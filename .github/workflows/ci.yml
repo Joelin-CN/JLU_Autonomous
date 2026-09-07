@@ -30,6 +30,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Prepare runtime environment
+        # 全新克隆没有 git 忽略的运行时前提：部分单测读取 backend/chaoxing_config.json
+        # 与仓库根 data/temp、data/output、data/logs（开发机上天然存在）
+        shell: pwsh
+        run: |
+          Copy-Item chaoxing_config.example.json chaoxing_config.json
+          New-Item -ItemType Directory -Force -Path ..\data\temp, ..\data\output, ..\data\logs | Out-Null
+
       - name: Run unit tests
         # 仅单测：integration / e2e 需要真实浏览器与凭据，不在 CI 范围
         run: python -m pytest tests/unit -q -s
