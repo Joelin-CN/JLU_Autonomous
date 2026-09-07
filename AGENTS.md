@@ -116,6 +116,11 @@ JLU_Autonomous/
 ## 验证驱动开发
 
 - 每次修改后运行验证：后端 `python -m pytest tests/unit -q -s`（Windows/Py3.13 需 `-s`），前端 `npm run typecheck`。
+- **新克隆前提**（本地跑单测前，CI 已在 workflow 内自动做同样的事）：
+  1. `backend/` 下复制 `chaoxing_config.example.json` → `chaoxing_config.json`；
+  2. 仓库根建 `data/temp`、`data/output`、`data/logs` 目录；
+  3. `data/passwords/chaoxing.txt` 放至少 1 个账号（`{...}` 分块格式，占位号段即可，见 `docs/standards/secrets.md`）；跑 `test_ai_backends` 的 DeepSeek 余额用例还需 `deepseek.txt` 占位密钥；
+  4. 全局安装 `@playwright/cli`（提供 `playwright-cli` 命令；npm 同名包 `playwright-cli` 是无 bin 的废弃存根）。
 - 重要修复创建带日期的报告文档，记录问题发现、根因、方案、验证方法。
 - 创建验证清单 `docs/validation/VALIDATION_AFTER_*.md`，明确 P0（必须）/ P1（重要）/ P2（可选）。
 

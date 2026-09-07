@@ -8,7 +8,8 @@
 - **定位升级**：README 重写为「JLU Autonomous —— 多平台自动学习助手」（超星 ✅ / 智慧树 🚧），新增平台支持矩阵与公开仓库声明。
 - **协作规范**：新增 `CONTRIBUTING.md`（双管理者 @Joelin-CN / @Arthur-Pendrag0n 异步协作：feature 分支 + PR、Conventional Commits、刷课需求 Issue 认领制）；`AGENTS.md` 同步更新（git 工作流从单人直推 main 切换为 PR 制）。
 - **文档体系**：新增 `docs/standards/`（directory / documents / secrets 三份规范）与 `docs/roadmap/zhihuishu.md`（智慧树路线图骨架，调研未开始）；`docs/README.md` 索引同步。
-- **GitHub 配置**：新增 `.github/`（Issue 模板 ×3 含刷课需求模板与隐私警告、PR 模板、CODEOWNERS、CI 工作流：后端 pytest 单测 + 前端 typecheck/vitest）与根部 `SECURITY.md`。
+- **GitHub 配置**：新增 `.github/`（Issue 模板 ×3 含刷课需求模板与隐私警告、PR 模板、CODEOWNERS、CI 工作流：后端 pytest 单测 + 前端 typecheck/vitest）与根部 `SECURITY.md`；6 个协作标签（brush-request / status\* / platform\*）与 main 分支保护（PR + 1 approve + CI 门槛）已就位。
+- **CI 首跑调通（4 轮）**：单测套件此前从未在全新克隆上运行过，CI 揭示并解决（仅改 workflow 与依赖清单，未动代码）：新克隆需 `chaoxing_config.example.json → chaoxing_config.json`、`data/{temp,output,logs}` 目录、`data/passwords/chaoxing.txt`（`{...}` 分块占位账号）与 `deepseek.txt` 占位密钥；playwright-cli 须装 `@playwright/cli`（npm 同名包为无 bin 废弃存根）；CI Python 对齐 3.13；`requirements-dev.txt` 补声明 `httpx`（存量缺口）。最终 CI 绿：后端 610 passed / 前端 typecheck + vitest 全过。
 - **安全加固**：清理跟踪文件中的真实手机号 1 处（`docs/validation/VALIDATION_AFTER_FULLCHECK_2026-08-22.md`，改为「未打码」表述）；代码 / 测试中的同一号码示例替换为占位号段 `13200003918`（掩码后断言不变，相关单测验证通过）。`.gitignore` 补 `.zcode/`、`.superpowers/`、`.claude/plans/`、`.env*`。
 
 
