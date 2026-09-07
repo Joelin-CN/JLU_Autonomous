@@ -6,7 +6,7 @@
 
 ## 项目概况
 
-- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通（含 OUC 开放大学）✅ 已支持；智慧树 🚧 规划中（见 `docs/roadmap/zhihuishu.md`）。
+- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 已支持；智慧树 🚧 规划中（见 `docs/roadmap/zhihuishu.md`）。项目范围仅此两个平台。
 - `frontend/`（Electron + Vue 3）与 `backend/`（Python 3.10+，Playwright 浏览器自动化 + AI 答题）在同一仓库。
 - 前端按 Electron 进程划分：`electron/`（主进程）/ `src/`（渲染进程，Vue 3 + Pinia）/ `src/shared/`（共享层）。
 - 后端 Python 包为 `backend/chaoxing/`（入口 `python -m chaoxing.api`，JSON-line 协议与 Electron 通信）。
