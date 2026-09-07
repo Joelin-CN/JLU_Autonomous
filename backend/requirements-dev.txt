@@ -5,3 +5,4 @@
 #   pip install -r requirements.txt -r requirements-dev.txt
 pytest>=7.0
 pillow>=9.0        # scripts/generate_captcha_images.py + image-drawing tests
+httpx>=0.24        # chaoxing.balance DeepSeek 免费余额接口（测试与脚本需要）
