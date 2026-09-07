@@ -56,7 +56,7 @@ JLU_Autonomous/
 │   ├── reports/              # analysis / fixes / updates
 │   ├── sessions/             # 会话总结与 Handoff（git 忽略）
 │   ├── validation/           # 验证清单
-│   └── logs/                 # 开发日志
+│   └── logs/                 # 开发日志（git 忽略）
 └── .github/                  # CI 工作流 / Issue 与 PR 模板 / CODEOWNERS
 ```
 

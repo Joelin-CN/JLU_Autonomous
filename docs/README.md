@@ -9,9 +9,9 @@
 | design/ | 常青设计文档（架构 / API / 整合 / 设计参考） | ✅ | [design/](design/) |
 | changelog/ | 版本变更 | ✅ | [CHANGELOG.md](changelog/CHANGELOG.md) |
 | reports/ | 过程报告（analysis / fixes / updates） | ✅ | [reports/](reports/) |
-| sessions/ | 会话总结与 Handoff 记录 | ❌ 本地 | [sessions/](sessions/) |
+| sessions/ | 会话总结与 Handoff 记录 | ❌ 本地 | 本地目录，不入库 |
 | validation/ | 验证清单 | ✅ | [validation/](validation/) |
-| logs/ | 开发日志 | ✅ | [logs/](logs/) |
+| logs/ | 开发日志 | ❌ 本地 | 本地目录，不入库 |
 
 > `sessions/`、`handoffs/`、`changelogs/`、`superpowers/`、`prototypes/` 为本地内部工作区（含账号 / 本机细节，git 忽略），不入公开仓库。
 

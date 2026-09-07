@@ -16,7 +16,7 @@
 | `docs/changelog/` | 版本变更 | ✅ | `CHANGELOG.md` + `archive/` 历史归档 |
 | `docs/reports/` | 过程报告 | ✅ | `analysis/` 分析、`fixes/` 修复、`updates/` 更新记录 |
 | `docs/validation/` | 验证清单 | ✅ | 修复 / 阶段后的验收检查表（P0/P1/P2 分级） |
-| `docs/logs/` | 开发日志 | ✅ | 日常零散记录 |
+| `docs/logs/` | 开发日志 | ❌ | 本地；`.gitignore` 裸名 `logs/` 在任意层级生效 |
 | `docs/sessions/` | 会话总结 / Handoff | ❌ | 含本地开发细节与账号信息，**仅留本地**（git 忽略） |
 | `docs/handoffs/` `docs/changelogs/` `docs/superpowers/` `docs/prototypes/` | 内部工作区 | ❌ | 同上，git 忽略 |
 | `frontend/docs/` `backend/README.md` | 模块本地速查 | ✅ | 紧邻模块的运行说明 |
