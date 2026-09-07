@@ -1,0 +1,8 @@
+# 双管理者共同拥有全仓库：任一 PR 自动请求两人 review
+*       @Joelin-CN @Arthur-Pendrag0n
+
+# 协作规则与凭据红线改动需双管理者都过目
+/CONTRIBUTING.md    @Joelin-CN @Arthur-Pendrag0n
+/SECURITY.md        @Joelin-CN @Arthur-Pendrag0n
+/docs/standards/    @Joelin-CN @Arthur-Pendrag0n
+/.github/           @Joelin-CN @Arthur-Pendrag0n

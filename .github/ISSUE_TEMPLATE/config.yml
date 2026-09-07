@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 协作规范
+    url: https://github.com/Joelin-CN/JLU_Autonomous/blob/main/CONTRIBUTING.md
+    about: 分支模型、PR 流程与刷课需求流转规则
