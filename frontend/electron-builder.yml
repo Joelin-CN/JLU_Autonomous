@@ -1,0 +1,53 @@
+appId: com.chaoxing.assistant
+productName: 超星助手
+copyright: Copyright © 2024
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist
+  - dist-electron
+  - build/icon.ico
+
+# Ship the Python backend alongside the app as read-only resources. At runtime
+# backendPath.ts resolves CODE_DIR = resources/backend (spawn cwd) and seeds a
+# writable workspace under userData. Python itself is NOT bundled — the README
+# documents the Python 3.10+ / pip install requirement.
+#
+# Explicit include list (NOT "**/*" with exclusions): runtime/sensitive trees
+# such as passwords/, chrome-profiles/ (logged-in cookies), screenshots/,
+# documents/, etc/, tests/ and .playwright-cli/ must NEVER ship in the
+# installer. scripts/ ships only the read-only assets that first-launch
+# seeding copies into the workspace (_table.json, _decrypt_font.js,
+# _v17_section_player.js). The EXAMPLE config ships (never the developer's
+# real chaoxing_config.json with course IDs/progress); the first-launch
+# seeding copies it to the workspace as chaoxing_config.json. The Chromium
+# memory flags config (.playwright/cli.config.json) also ships — seeding
+# copies it or the packaged app loses those flags.
+extraResources:
+  - from: ../backend
+    to: backend
+    filter:
+      - chaoxing/**/*.py
+      - chaoxing/**/*.js
+      - chaoxing/**/*.json
+      - scripts/_table.json
+      - scripts/_decrypt_font.js
+      - scripts/_v17_section_player.js
+      - chaoxing_config.example.json
+      - .playwright/cli.config.json
+      - requirements.txt
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

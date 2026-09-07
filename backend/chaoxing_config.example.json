@@ -1,0 +1,50 @@
+{
+  "session": "chaoxing-chrome",
+  "playwright_cli": "playwright-cli.cmd",
+  "chrome_args": [
+    "--disable-gpu",
+    "--disable-software-rasterizer"
+  ],
+  "max_concurrent": 10,
+  "ai": {
+    "provider": "doubao-api",
+    "doubao": {
+      "model": "ep-<your-endpoint-id>",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "timeout": 180,
+      "max_retries": 3,
+      "retry_base_delay": 2
+    },
+    "deepseek": {
+      "model": "deepseek-v4-flash-vision-exp",
+      "base_url": "https://api.deepseek.com",
+      "timeout": 180,
+      "max_retries": 3,
+      "retry_base_delay": 2
+    }
+  },
+  "courses": [
+    {
+      "name": "<课程名称>",
+      "priority": 1,
+      "courseid": "<courseid>",
+      "clazzid": "<clazzid>",
+      "cpi": "<cpi>",
+      "current_progress": 0,
+      "total_tasks": 0
+    }
+  ],
+  "timeouts": {
+    "page_load": 30,
+    "video_watch": 60,
+    "quiz_answer": 120,
+    "section_complete": 15,
+    "snapshot": 15,
+    "click_action": 10
+  },
+  "retry": {
+    "quiz_max_retries": 10,
+    "quiz_target_score": 100,
+    "section_max_retries": 3
+  }
+}

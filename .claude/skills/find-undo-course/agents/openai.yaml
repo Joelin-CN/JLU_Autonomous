@@ -1,0 +1,4 @@
+interface:
+  display_name: "Find Unfinished Courses"
+  short_description: "Find OUCHN courses below 100% progress"
+  default_prompt: "Use $find-undo-course to list OUCHN 我的课程 entries whose 学习进度 is below 100%."

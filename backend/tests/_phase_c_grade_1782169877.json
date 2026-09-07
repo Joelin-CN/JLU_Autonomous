@@ -1,0 +1,320 @@
+{
+  "course": "概率论与数理统计",
+  "section": "2.7 第二章测试2",
+  "total_questions": 30,
+  "ai_answers": [
+    {
+      "index": 1,
+      "answer": "A"
+    },
+    {
+      "index": 2,
+      "answer": "B"
+    },
+    {
+      "index": 3,
+      "answer": "C"
+    },
+    {
+      "index": 4,
+      "answer": "A"
+    },
+    {
+      "index": 5,
+      "answer": "D"
+    },
+    {
+      "index": 6,
+      "answer": "A"
+    },
+    {
+      "index": 7,
+      "answer": "B"
+    },
+    {
+      "index": 8,
+      "answer": "A"
+    },
+    {
+      "index": 9,
+      "answer": "B"
+    },
+    {
+      "index": 10,
+      "answer": "A"
+    },
+    {
+      "index": 11,
+      "answer": "A"
+    },
+    {
+      "index": 12,
+      "answer": "D"
+    },
+    {
+      "index": 13,
+      "answer": "A"
+    },
+    {
+      "index": 14,
+      "answer": "D"
+    },
+    {
+      "index": 15,
+      "answer": "C"
+    },
+    {
+      "index": 16,
+      "answer": "C"
+    },
+    {
+      "index": 17,
+      "answer": "A"
+    },
+    {
+      "index": 18,
+      "answer": "A"
+    },
+    {
+      "index": 19,
+      "answer": "C"
+    },
+    {
+      "index": 20,
+      "answer": "D"
+    },
+    {
+      "index": 21,
+      "answer": "B"
+    },
+    {
+      "index": 22,
+      "answer": "A"
+    },
+    {
+      "index": 23,
+      "answer": "A"
+    },
+    {
+      "index": 24,
+      "answer": "B"
+    },
+    {
+      "index": 25,
+      "answer": "A"
+    },
+    {
+      "index": 26,
+      "answer": "B"
+    },
+    {
+      "index": 27,
+      "answer": "D"
+    },
+    {
+      "index": 28,
+      "answer": "D"
+    },
+    {
+      "index": 29,
+      "answer": "A"
+    },
+    {
+      "index": 30,
+      "answer": "D"
+    }
+  ],
+  "grade_result": {
+    "accuracy": 96.0,
+    "correct": 24,
+    "incorrect": 1,
+    "uncertain": 0,
+    "per_question": [
+      {
+        "index": 1,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "P(|X|>2) = 1 - P(-2 ≤ X ≤ 2) = 1 - [Φ(2) - Φ(-2)] = 1 - [Φ(2) - (1 - Φ(2))] = 2 - 2Φ(2) = 2[1 - Φ(2)]。"
+      },
+      {
+        "index": 2,
+        "selected": "B",
+        "is_correct": true,
+        "correct_answer": "B",
+        "explanation": "正态分布关于x=4对称，P(X<0)=0.1，则P(X>8)=0.1。所以P(4<X<8) = (1 - 0.1 - 0.1) / 2 = 0.4。"
+      },
+      {
+        "index": 3,
+        "selected": "C",
+        "is_correct": false,
+        "correct_answer": "B",
+        "explanation": "Y=2X+1，反函数x=(y-1)/2，导数绝对值为1/2，y>1。f_Y(y) = f_X((y-1)/2) * 1/2 = 1/2 * e^(-(y-1)/2) (y>1)。选项B正确，用户误选C。"
+      },
+      {
+        "index": 4,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "Y=2X，反函数x=y/2，导数绝对值为1/2。f_Y(y) = f_X(y/2) * 1/2 = 1/[π(1+y²/4)] * 1/2 = 2/[π(4+y²)]。"
+      },
+      {
+        "index": 5,
+        "selected": "D",
+        "is_correct": true,
+        "correct_answer": "D",
+        "explanation": "A∪B=B等价于A⊂B。选项D等价于B⊂A，与其他选项不等价。"
+      },
+      {
+        "index": 6,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "利用随机变量线性变换的密度函数公式，Y=4X+3，反函数x=(y-3)/4，导数为1/4，代入得f_Y(y) = 1/4 * e^{-(y-3)/4}，且y>3时x>0。"
+      },
+      {
+        "index": 7,
+        "selected": "B",
+        "is_correct": true,
+        "correct_answer": "B",
+        "explanation": "概率密度函数f(x)必须满足在实数域上的积分为1，因此它一定是可积函数。"
+      },
+      {
+        "index": 8,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "令y=2x+3，则x=(y-3)/2，x' = 1/2。当x>0时，y>3。代入公式得f_Y(y) = 1/2 * e^{-(y-3)/2}, y>3。"
+      },
+      {
+        "index": 9,
+        "selected": "B",
+        "is_correct": true,
+        "correct_answer": "B",
+        "explanation": "正态分布N(1,1)的密度函数关于x=1对称，因此随机变量大于1和小于1的概率相等，即P{X≤1}=P{X>1}=0.5。"
+      },
+      {
+        "index": 10,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "选项A是柯西分布的密度函数，在整个实数轴上大于0，且积分∫_{-∞}^{+∞} 1/(π(1+x^2)) dx = 1，满足概率密度的所有性质。"
+      },
+      {
+        "index": 11,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "根据随机变量函数的分布公式，由y=2x+1得反函数x=(y-1)/2，代入并乘以导数1/2，取值范围变为y>1。"
+      },
+      {
+        "index": 12,
+        "selected": "D",
+        "is_correct": true,
+        "correct_answer": "D",
+        "explanation": "总取法为C(9,3)=84种，取出1个白球和2个红球的取法为C(4,1)*C(5,2)=40种，概率为40/84=10/21。"
+      },
+      {
+        "index": 13,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "正态分布经过线性变换后仍为正态分布，期望为aμ-b，方差为a²σ²，所以Y~N(aμ-b, a²σ²)。"
+      },
+      {
+        "index": 14,
+        "selected": "D",
+        "is_correct": true,
+        "correct_answer": "D",
+        "explanation": "标准化得P(X≤1+μ)=Φ(1/σ)，标准正态分布函数Φ是增函数，因此该概率随σ的增大而减小。"
+      },
+      {
+        "index": 15,
+        "selected": "C",
+        "is_correct": true,
+        "correct_answer": "C",
+        "explanation": "由Y=5X+1得反函数x=(y-1)/5，代入原密度函数并乘以导数1/5，新变量的取值范围为y>1。"
+      },
+      {
+        "index": 16,
+        "selected": "C",
+        "is_correct": true,
+        "correct_answer": "C",
+        "explanation": "P(X>2)即P(X=3)，由题设分布率可知P(X=3)=0.6。"
+      },
+      {
+        "index": 17,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "标准化得P(|X-μ|<σ)=P(|Z|<1)=2Φ(1)-1，与σ无关，保持不变。"
+      },
+      {
+        "index": 18,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "由y=5x+2得x=(y-2)/5，利用公式f_Y(y)=f_X(x)|dx/dy|得f_Y(y)=1/5 e^{-(y-2)/5}, y>2。"
+      },
+      {
+        "index": 19,
+        "selected": "C",
+        "is_correct": true,
+        "correct_answer": "C",
+        "explanation": "Y=X^2时，f_Y(y)=f_X(√y)/(2√y)+f_X(-√y)/(2√y)=e^{-√y}/(2√y), y≥0。"
+      },
+      {
+        "index": 20,
+        "selected": "D",
+        "is_correct": true,
+        "correct_answer": "D",
+        "explanation": "标准化得P(|X-μ|>σ)=P(|Z|>1)=1-(2Φ(1)-1)=2-2Φ(1)，与σ无关，保持不变。"
+      },
+      {
+        "index": 21,
+        "selected": "B",
+        "is_correct": true,
+        "correct_answer": "B",
+        "explanation": "由概率密度函数在定义域上积分为1解得常数C为4/π。"
+      },
+      {
+        "index": 22,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "利用随机变量函数的密度公式代入计算，得到Y的密度函数为1/5 * e^(-(y-4)/5)，即选项A。"
+      },
+      {
+        "index": 23,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "分布函数F(3/2)即为变量小于等于1.5的概率之和，计算得0.1+0.2+0.3=0.6。"
+      },
+      {
+        "index": 24,
+        "selected": "B",
+        "is_correct": true,
+        "correct_answer": "B",
+        "explanation": "利用正态分布关于均值x=3对称的性质，计算P(1<X<3)等于0.5-0.2，从而P(3<X<5)为0.3。"
+      },
+      {
+        "index": 25,
+        "selected": "A",
+        "is_correct": true,
+        "correct_answer": "A",
+        "explanation": "利用概率总和为1，由无穷等比数列求和公式得到bλ/(1-λ)=1，解得λ=1/(b+1)。"
+      }
+    ]
+  },
+  "timing": {
+    "capture_s": 9.7,
+    "solve_s": 471.2,
+    "fill_s": 39.5,
+    "capture_filled_s": 10.3,
+    "grade_s": 636.8,
+    "total_s": 1168.6
+  },
+  "timestamp": "2026-06-23 07:11:17",
+  "passed": true
+}

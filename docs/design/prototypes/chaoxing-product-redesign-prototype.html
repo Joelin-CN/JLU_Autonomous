@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chaoxing Product Redesign Prototype</title>
+  <style>
+    :root {
+      --bg: #efe8db;
+      --ink: #101718;
+      --muted: #5f6a69;
+      --line: rgba(16, 23, 24, 0.1);
+      --panel: rgba(255, 251, 245, 0.78);
+      --panel-strong: #fff9f1;
+      --teal: #156f63;
+      --orange: #c05a2d;
+      --gold: #c39224;
+      --good: #2f7d4d;
+      --shadow: 0 24px 60px rgba(42, 29, 14, 0.12);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+      --font-ui: "Aptos", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      --font-display: "Bahnschrift", "Trebuchet MS", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-ui);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(21, 111, 99, 0.18), transparent 30%),
+        radial-gradient(circle at 100% 0%, rgba(192, 90, 45, 0.18), transparent 26%),
+        linear-gradient(180deg, #f6f0e5 0%, var(--bg) 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(16, 23, 24, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 23, 24, 0.03) 1px, transparent 1px);
+      background-size: 26px 26px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.42), transparent 88%);
+    }
+
+    .app {
+      width: min(1540px, calc(100% - 28px));
+      margin: 14px auto 28px;
+      display: grid;
+      grid-template-columns: 240px 1fr 340px;
+      gap: 18px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .panel,
+    .sidebar,
+    .hero {
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar {
+      border-radius: 30px;
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 18px;
+      min-height: calc(100vh - 42px);
+      position: sticky;
+      top: 14px;
+    }
+
+    .brand {
+      display: grid;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 56px;
+      height: 56px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(135deg, rgba(21, 111, 99, 0.92), rgba(195, 146, 36, 0.92));
+      color: white;
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 24px;
+      letter-spacing: 0.04em;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 26px;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .brand p,
+    .helper,
+    .nav-item small,
+    .mini-note,
+    .feed-item p,
+    .ticket p,
+    .lane p,
+    .course-card p,
+    .strategy-card p,
+    .objective-card p,
+    .outline,
+    .stage-card p,
+    .metric-label {
+      color: var(--muted);
+    }
+
+    .brand p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .helper {
+      font-size: 12px;
+      line-height: 1.55;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(16, 23, 24, 0.04);
+      border: 1px dashed rgba(16, 23, 24, 0.08);
+    }
+
+    .nav {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .nav-item {
+      padding: 14px 14px 13px;
+      border-radius: 18px;
+      border: 1px solid transparent;
+      background: rgba(255, 255, 255, 0.44);
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav-item.active {
+      border-color: rgba(21, 111, 99, 0.22);
+      background: linear-gradient(135deg, rgba(21, 111, 99, 0.12), rgba(255, 255, 255, 0.7));
+    }
+
+    .nav-item strong {
+      font-size: 14px;
+    }
+
+    .mini-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .mini-card {
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.56);
+      border: 1px solid var(--line);
+    }
+
+    .mini-card strong {
+      display: block;
+      font-size: 22px;
+      margin-top: 6px;
+    }
+
+    .main {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .hero {
+      border-radius: 34px;
+      padding: 24px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: -60px;
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(21, 111, 99, 0.18), transparent 70%);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--teal), var(--gold));
+      box-shadow: 0 0 0 8px rgba(21, 111, 99, 0.08);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+      align-items: end;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero h2 {
+      margin: 10px 0 10px;
+      font-family: var(--font-display);
+      font-size: clamp(34px, 4.8vw, 60px);
+      line-height: 0.96;
+      letter-spacing: -0.05em;
+      max-width: 760px;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 760px;
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+
+    .hero-board {
+      padding: 18px;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.52);
+      border: 1px solid rgba(16, 23, 24, 0.08);
+      display: grid;
+      gap: 12px;
+    }
+
+    .hero-board h3,
+    .section-head h3,
+    .rail-head h3,
+    .dialog h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .hero-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(16, 23, 24, 0.06);
+      color: var(--muted);
+      border: 1px solid transparent;
+    }
+
+    .chip.teal {
+      background: rgba(21, 111, 99, 0.14);
+      color: var(--teal);
+    }
+
+    .chip.orange {
+      background: rgba(192, 90, 45, 0.12);
+      color: var(--orange);
+    }
+
+    .chip.gold {
+      background: rgba(195, 146, 36, 0.14);
+      color: #856516;
+    }
+
+    .section,
+    .rail {
+      border-radius: 30px;
+      padding: 20px;
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      box-shadow: var(--shadow);
+    }
+
+    .section-head,
+    .rail-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .section-head p,
+    .rail-head p,
+    .dialog p {
+      margin: 4px 0 0;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+
+    .metric {
+      text-align: right;
+    }
+
+    .metric-value {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      font-family: var(--font-display);
+    }
+
+    .planner {
+      display: grid;
+      gap: 14px;
+    }
+
+    .objective-grid,
+    .strategy-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .objective-card,
+    .strategy-card,
+    .course-card,
+    .operator-card,
+    .ticket,
+    .lane,
+    .stage-card,
+    .feed-item {
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.56);
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .objective-card,
+    .strategy-card,
+    .course-card,
+    .operator-card {
+      cursor: pointer;
+      padding: 16px;
+    }
+
+    .objective-card:hover,
+    .strategy-card:hover,
+    .course-card:hover,
+    .operator-card:hover {
+      transform: translateY(-2px);
+    }
+
+    .objective-card.active,
+    .strategy-card.active,
+    .course-card.active,
+    .operator-card.active {
+      border-color: rgba(21, 111, 99, 0.28);
+      background: linear-gradient(180deg, rgba(21, 111, 99, 0.12), rgba(255, 255, 255, 0.72));
+    }
+
+    .objective-card strong,
+    .strategy-card strong,
+    .course-card strong,
+    .operator-card strong,
+    .lane strong,
+    .stage-card strong,
+    .ticket strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+
+    .objective-card p,
+    .strategy-card p,
+    .course-card p,
+    .operator-card p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .course-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .course-top,
+    .operator-top,
+    .stage-top,
+    .lane-top,
+    .ticket-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .operator-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .summary-bar {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 12px;
+      align-items: stretch;
+      margin-top: 2px;
+    }
+
+    .summary-card,
+    .action-card {
+      border-radius: 24px;
+      padding: 18px;
+      background: #151c1d;
+      color: #ebfaf4;
+    }
+
+    .summary-card p,
+    .action-card p {
+      margin: 0;
+      color: rgba(235, 250, 244, 0.74);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .summary-card strong,
+    .action-card strong {
+      display: block;
+      font-size: 20px;
+      margin-bottom: 8px;
+      color: white;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      padding: 12px 15px;
+      border-radius: 14px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--teal), #299886);
+      color: white;
+      box-shadow: 0 12px 26px rgba(21, 111, 99, 0.24);
+    }
+
+    .btn.secondary {
+      background: rgba(255, 255, 255, 0.14);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .btn.ghost {
+      background: rgba(16, 23, 24, 0.05);
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+
+    .board-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .stage-stack,
+    .lane-stack,
+    .ticket-stack,
+    .feed-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .stage-card,
+    .lane,
+    .ticket,
+    .feed-item {
+      padding: 14px;
+    }
+
+    .stage-card.active {
+      border-color: rgba(21, 111, 99, 0.28);
+      background: linear-gradient(180deg, rgba(21, 111, 99, 0.12), rgba(255, 255, 255, 0.72));
+    }
+
+    .stage-index {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: rgba(16, 23, 24, 0.08);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .progress {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(16, 23, 24, 0.08);
+      overflow: hidden;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--teal), #46b39c);
+    }
+
+    .right-rail {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .ticket.high {
+      border-color: rgba(192, 90, 45, 0.22);
+      background: linear-gradient(180deg, rgba(192, 90, 45, 0.1), rgba(255, 255, 255, 0.72));
+    }
+
+    .ticket.medium {
+      border-color: rgba(195, 146, 36, 0.22);
+      background: linear-gradient(180deg, rgba(195, 146, 36, 0.1), rgba(255, 255, 255, 0.72));
+    }
+
+    .ticket.low {
+      border-color: rgba(47, 125, 77, 0.18);
+      background: linear-gradient(180deg, rgba(47, 125, 77, 0.08), rgba(255, 255, 255, 0.72));
+    }
+
+    .ticket p,
+    .lane p,
+    .stage-card p,
+    .feed-item p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      background: rgba(16, 23, 24, 0.08);
+      color: var(--muted);
+    }
+
+    .pill.teal {
+      background: rgba(21, 111, 99, 0.14);
+      color: var(--teal);
+    }
+
+    .pill.orange {
+      background: rgba(192, 90, 45, 0.12);
+      color: var(--orange);
+    }
+
+    .pill.gold {
+      background: rgba(195, 146, 36, 0.14);
+      color: #856516;
+    }
+
+    .rail-metric {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .rail-metric .mini-card {
+      background: rgba(255, 255, 255, 0.52);
+    }
+
+    .feed-item {
+      background: #131a1b;
+      color: #daf2eb;
+      border-color: rgba(255, 255, 255, 0.08);
+      font-family: Consolas, "SFMono-Regular", monospace;
+    }
+
+    .feed-item strong {
+      color: white;
+      margin-bottom: 6px;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(11, 16, 17, 0.46);
+      z-index: 8;
+    }
+
+    .overlay.open {
+      display: flex;
+    }
+
+    .dialog {
+      width: min(620px, 100%);
+      padding: 24px;
+      border-radius: 28px;
+      background: rgba(255, 251, 245, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
+    }
+
+    .dialog-box {
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 18px;
+      background: #151c1d;
+      color: #ebfaf4;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    @media (max-width: 1280px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        min-height: auto;
+        position: static;
+        grid-template-columns: 1.1fr 1fr;
+        grid-template-rows: auto auto;
+      }
+
+      .hero-grid,
+      .summary-bar,
+      .board-grid,
+      .objective-grid,
+      .strategy-grid,
+      .course-grid,
+      .operator-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .app {
+        width: min(100% - 14px, 100%);
+        margin: 7px auto 18px;
+      }
+
+      .sidebar,
+      .section,
+      .hero,
+      .rail {
+        border-radius: 22px;
+        padding: 16px;
+      }
+
+      .sidebar {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">CX</div>
+        <div>
+          <h1>Campaign Desk</h1>
+          <p>把它做成桌面产品，而不是命令包装器。用户应该先说目标，再由系统生成执行方案。</p>
+        </div>
+      </div>
+
+      <div class="helper">
+        这版原型故意不暴露旧脚本概念。界面只关心四件事：<br />
+        `目标`、`课程范围`、`执行策略`、`人工接管点`。
+      </div>
+
+      <div class="nav">
+        <div class="nav-item active">
+          <strong>Campaign Studio</strong>
+          <small>创建一次结果导向的运行计划</small>
+        </div>
+        <div class="nav-item">
+          <strong>Course Atlas</strong>
+          <small>课程健康度、风险、积压量</small>
+        </div>
+        <div class="nav-item">
+          <strong>Operators</strong>
+          <small>账号席位、会话、负载分配</small>
+        </div>
+        <div class="nav-item">
+          <strong>Attention Queue</strong>
+          <small>需要人工干预的事项入口</small>
+        </div>
+      </div>
+
+      <div class="mini-stack">
+        <div class="mini-card">
+          <div class="metric-label">可用 Operator</div>
+          <strong id="operatorCount">2</strong>
+        </div>
+        <div class="mini-card">
+          <div class="metric-label">选中课程</div>
+          <strong id="courseCount">2</strong>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow">Product Direction</div>
+            <h2>先定义结果，再让系统决定怎么跑。</h2>
+            <p>
+              新界面不再让用户在一堆命令和参数里做翻译工作。它提供一种更像“任务导演台”的体验：选目标、圈课程、设策略、分配执行席位，系统自动生成 Campaign，并在需要时把风险抛到人工接管队列。
+            </p>
+          </div>
+          <div class="hero-board">
+            <div class="hero-row">
+              <strong>当前 Campaign 草案</strong>
+              <span class="pill teal" id="heroStatus">Draft</span>
+            </div>
+            <div class="chip-row">
+              <span class="chip teal" id="heroObjective">Catch Up</span>
+              <span class="chip gold" id="heroStrategy">Balanced</span>
+              <span class="chip orange" id="heroScope">2 Courses</span>
+            </div>
+            <div class="outline" id="heroSummary">
+              目标是优先清理积压任务，同时尽量减少人工介入。系统会自动把低风险任务批量执行，把不确定项塞进 Attention Queue。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h3>Campaign Builder</h3>
+            <p>它应该像搭建一次执行战役，而不是选择某个脚本分支。</p>
+          </div>
+          <div class="metric">
+            <div class="metric-value" id="estimatedFinish">2h 10m</div>
+            <div class="metric-label">预计完成时间</div>
+          </div>
+        </div>
+
+        <div class="planner">
+          <div>
+            <div class="outline" style="margin-bottom: 10px;">1. 先选这次想达成什么结果</div>
+            <div class="objective-grid" id="objectiveGrid"></div>
+          </div>
+
+          <div>
+            <div class="outline" style="margin-bottom: 10px;">2. 再圈定本次 Campaign 涉及哪些课程</div>
+            <div class="course-grid" id="courseGrid"></div>
+          </div>
+
+          <div>
+            <div class="outline" style="margin-bottom: 10px;">3. 决定自动化策略和人工介入阈值</div>
+            <div class="strategy-grid" id="strategyGrid"></div>
+          </div>
+
+          <div>
+            <div class="outline" style="margin-bottom: 10px;">4. 分配可用执行席位</div>
+            <div class="operator-grid" id="operatorGrid"></div>
+          </div>
+
+          <div class="summary-bar">
+            <div class="summary-card">
+              <strong id="campaignTitle">Campaign: Catch Up / Mid-Risk / 2 Courses</strong>
+              <p id="campaignText">系统将优先消化可自动完成的任务，把低置信度结果、会话异常、验证码等推送到 Attention Queue 等你处理。</p>
+            </div>
+            <div class="action-card">
+              <strong>Control</strong>
+              <p>这里未来不展示命令，只展示一个清晰的执行承诺和风险边界。</p>
+              <div class="actions">
+                <button class="btn primary" id="launchBtn">Launch Campaign</button>
+                <button class="btn secondary" id="simulateBtn">Preview Outcome</button>
+                <button class="btn ghost" id="pauseBtn">Pause</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h3>Execution Map</h3>
+            <p>系统生成的 Campaign 在运行时应该被解释成一张可观察的地图，而不是一串 stdout。</p>
+          </div>
+          <div class="metric">
+            <div class="metric-value" id="liveProgress">38%</div>
+            <div class="metric-label">运行进度</div>
+          </div>
+        </div>
+
+        <div class="board-grid">
+          <div>
+            <div class="outline" style="margin-bottom: 10px;">Campaign stages</div>
+            <div class="stage-stack" id="stageStack"></div>
+          </div>
+          <div>
+            <div class="outline" style="margin-bottom: 10px;">Operator lanes</div>
+            <div class="lane-stack" id="laneStack"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="right-rail">
+      <section class="rail">
+        <div class="rail-head">
+          <div>
+            <h3>Attention Queue</h3>
+            <p>真正需要用户看的，不是全部细节，而是会阻塞结果的事情。</p>
+          </div>
+          <span class="pill orange" id="attentionCount">3 Open</span>
+        </div>
+        <div class="ticket-stack" id="ticketStack"></div>
+      </section>
+
+      <section class="rail">
+        <div class="rail-head">
+          <div>
+            <h3>Outcome Forecast</h3>
+            <p>用更产品化的语言描述“这次跑完会怎样”。</p>
+          </div>
+        </div>
+        <div class="rail-metric">
+          <div class="mini-card">
+            <div class="metric-label">预计完成项</div>
+            <strong id="forecastDone">31</strong>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">人工介入</div>
+            <strong id="forecastAttention">4</strong>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">风险等级</div>
+            <strong id="forecastRisk">M2</strong>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">置信区间</div>
+            <strong id="forecastConfidence">86%</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="rail">
+        <div class="rail-head">
+          <div>
+            <h3>Operator Feed</h3>
+            <p>未来这里直接接子进程事件流，而不是简单终端输出。</p>
+          </div>
+        </div>
+        <div class="feed-stack" id="feedStack"></div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="dialog">
+      <h3>Campaign Preview</h3>
+      <p id="dialogText">系统即将根据当前配置生成一张执行计划。</p>
+      <div class="dialog-box" id="dialogBox"></div>
+      <div class="dialog-actions">
+        <button class="btn ghost" id="closeDialogBtn">Close</button>
+        <button class="btn primary" id="confirmLaunchBtn">Start</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const objectives = [
+      {
+        id: "catchup",
+        title: "Catch Up",
+        text: "尽快消化积压任务，优先提升整体完成度。",
+        eta: "2h 10m",
+        forecastDone: 31,
+        attention: 4,
+        risk: "M2",
+        confidence: "86%",
+      },
+      {
+        id: "exam",
+        title: "Exam Sprint",
+        text: "围绕测验和高权重任务做短时冲刺，追求结果而不是全面性。",
+        eta: "1h 20m",
+        forecastDone: 18,
+        attention: 6,
+        risk: "M3",
+        confidence: "79%",
+      },
+      {
+        id: "clean",
+        title: "Quiet Maintenance",
+        text: "低噪声、低干预地维持课程进度，不追求极限速度。",
+        eta: "3h 40m",
+        forecastDone: 22,
+        attention: 2,
+        risk: "M1",
+        confidence: "91%",
+      },
+      {
+        id: "custom",
+        title: "Custom Mix",
+        text: "按课程状况手工编排权重，更适合复杂多课组合。",
+        eta: "2h 50m",
+        forecastDone: 27,
+        attention: 5,
+        risk: "M2",
+        confidence: "84%",
+      }
+    ];
+
+    const courses = [
+      {
+        id: "prob",
+        name: "概率论与数理统计",
+        text: "积压较高，适合优先清理。",
+        left: "21 pending",
+        risk: "Quiz heavy",
+      },
+      {
+        id: "phy",
+        name: "大学物理ABC（下）",
+        text: "内容型任务多，适合后台顺跑。",
+        left: "29 pending",
+        risk: "Long watch",
+      },
+      {
+        id: "eng",
+        name: "综合英语-2025",
+        text: "任务分布均匀，适合穿插执行。",
+        left: "20 pending",
+        risk: "Mixed",
+      }
+    ];
+
+    const strategies = [
+      {
+        id: "balanced",
+        title: "Balanced",
+        text: "默认推荐。系统自动决策，但把异常集中抛到人工队列。",
+        summary: "自动执行 + 人工接管队列",
+      },
+      {
+        id: "careful",
+        title: "Careful",
+        text: "更低风险。对不确定动作更早停下，适合白天手看场景。",
+        summary: "高阈值拦截 + 更多确认",
+      },
+      {
+        id: "overnight",
+        title: "Overnight",
+        text: "更强吞吐。适合夜间批量推进，但人工响应更少。",
+        summary: "批量推进 + 宽松阈值",
+      },
+      {
+        id: "surgical",
+        title: "Surgical",
+        text: "只处理高价值节点，不清扫长尾任务。",
+        summary: "聚焦高权重任务",
+      }
+    ];
+
+    const operators = [
+      { id: "op0", title: "Operator A", text: "主账号，会话稳定，适合主线任务。", tag: "Stable" },
+      { id: "op1", title: "Operator B", text: "备用账号，适合内容型任务分担。", tag: "Light Load" },
+      { id: "op2", title: "Operator C", text: "空闲但历史波动较大，建议只做边缘任务。", tag: "Watch Closely" }
+    ];
+
+    const stages = [
+      {
+        title: "Frame Scope",
+        text: "确认目标、课程范围、资源席位和风险边界。"
+      },
+      {
+        title: "Build Plan",
+        text: "系统把选项翻译为可执行计划和接管规则。"
+      },
+      {
+        title: "Dispatch Work",
+        text: "把任务拆给多个 Operator，开始推进。"
+      },
+      {
+        title: "Watch Exceptions",
+        text: "把异常和不确定项送入 Attention Queue。"
+      },
+      {
+        title: "Verify Outcome",
+        text: "回收结果，校验完成度，输出可恢复状态。"
+      }
+    ];
+
+    const tickets = [
+      {
+        level: "high",
+        title: "Session Drift",
+        text: "Operator A 的课程上下文可能偏移，建议快速回看。",
+        pill: "Needs Decision"
+      },
+      {
+        level: "medium",
+        title: "Low Confidence Cluster",
+        text: "两道题答案置信度过低，系统暂时没有提交。",
+        pill: "Review"
+      },
+      {
+        level: "low",
+        title: "Content Lag",
+        text: "Operator B 的长视频进展慢于预测，但不阻塞主结果。",
+        pill: "Observe"
+      }
+    ];
+
+    const feedItems = [
+      {
+        title: "[16:31] Plan built",
+        text: "Campaign graph assembled: 2 operators, 2 courses, 31 projected completions."
+      },
+      {
+        title: "[16:33] Scope shift",
+        text: "Physics track moved to background lane because of long-content density."
+      },
+      {
+        title: "[16:35] Attention ticket",
+        text: "Low-confidence cluster captured and parked in review queue."
+      }
+    ];
+
+    const state = {
+      objective: "catchup",
+      strategy: "balanced",
+      selectedCourses: ["prob", "phy"],
+      selectedOperators: ["op0", "op1"],
+      liveStage: 2,
+      running: false,
+      paused: false,
+    };
+
+    const objectiveGrid = document.getElementById("objectiveGrid");
+    const courseGrid = document.getElementById("courseGrid");
+    const strategyGrid = document.getElementById("strategyGrid");
+    const operatorGrid = document.getElementById("operatorGrid");
+    const stageStack = document.getElementById("stageStack");
+    const laneStack = document.getElementById("laneStack");
+    const ticketStack = document.getElementById("ticketStack");
+    const feedStack = document.getElementById("feedStack");
+    const overlay = document.getElementById("overlay");
+    const dialogText = document.getElementById("dialogText");
+    const dialogBox = document.getElementById("dialogBox");
+
+    function getObjective() {
+      return objectives.find((item) => item.id === state.objective);
+    }
+
+    function getStrategy() {
+      return strategies.find((item) => item.id === state.strategy);
+    }
+
+    function renderObjectives() {
+      objectiveGrid.innerHTML = objectives.map((item) => `
+        <button class="objective-card ${state.objective === item.id ? "active" : ""}" data-objective="${item.id}">
+          <strong>${item.title}</strong>
+          <p>${item.text}</p>
+        </button>
+      `).join("");
+
+      objectiveGrid.querySelectorAll("[data-objective]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.objective = button.dataset.objective;
+          renderAll();
+        });
+      });
+    }
+
+    function renderCourses() {
+      courseGrid.innerHTML = courses.map((item) => `
+        <button class="course-card ${state.selectedCourses.includes(item.id) ? "active" : ""}" data-course="${item.id}">
+          <div class="course-top">
+            <strong>${item.name}</strong>
+            <span class="pill gold">${item.left}</span>
+          </div>
+          <p>${item.text}</p>
+          <div class="chip-row" style="margin-top: 10px;">
+            <span class="chip">${item.risk}</span>
+          </div>
+        </button>
+      `).join("");
+
+      courseGrid.querySelectorAll("[data-course]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = button.dataset.course;
+          if (state.selectedCourses.includes(id)) {
+            if (state.selectedCourses.length === 1) return;
+            state.selectedCourses = state.selectedCourses.filter((item) => item !== id);
+          } else {
+            state.selectedCourses = [...state.selectedCourses, id];
+          }
+          renderAll();
+        });
+      });
+    }
+
+    function renderStrategies() {
+      strategyGrid.innerHTML = strategies.map((item) => `
+        <button class="strategy-card ${state.strategy === item.id ? "active" : ""}" data-strategy="${item.id}">
+          <strong>${item.title}</strong>
+          <p>${item.text}</p>
+          <div class="chip-row" style="margin-top: 10px;">
+            <span class="chip teal">${item.summary}</span>
+          </div>
+        </button>
+      `).join("");
+
+      strategyGrid.querySelectorAll("[data-strategy]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.strategy = button.dataset.strategy;
+          renderAll();
+        });
+      });
+    }
+
+    function renderOperators() {
+      operatorGrid.innerHTML = operators.map((item) => `
+        <button class="operator-card ${state.selectedOperators.includes(item.id) ? "active" : ""}" data-operator="${item.id}">
+          <div class="operator-top">
+            <strong>${item.title}</strong>
+            <span class="pill ${item.id === "op2" ? "orange" : "teal"}">${item.tag}</span>
+          </div>
+          <p>${item.text}</p>
+        </button>
+      `).join("");
+
+      operatorGrid.querySelectorAll("[data-operator]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = button.dataset.operator;
+          if (state.selectedOperators.includes(id)) {
+            if (state.selectedOperators.length === 1) return;
+            state.selectedOperators = state.selectedOperators.filter((item) => item !== id);
+          } else {
+            state.selectedOperators = [...state.selectedOperators, id];
+          }
+          renderAll();
+        });
+      });
+    }
+
+    function renderStages() {
+      stageStack.innerHTML = stages.map((item, index) => `
+        <div class="stage-card ${index === state.liveStage ? "active" : ""}">
+          <div class="stage-top">
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+              <div class="stage-index">${index + 1}</div>
+              <div>
+                <strong>${item.title}</strong>
+                <p>${item.text}</p>
+              </div>
+            </div>
+            <span class="pill ${index < state.liveStage ? "teal" : index === state.liveStage ? "gold" : ""}">
+              ${index < state.liveStage ? "Done" : index === state.liveStage ? (state.paused ? "Paused" : "Live") : "Queued"}
+            </span>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function renderLanes() {
+      const courseNames = state.selectedCourses.map((id) => courses.find((item) => item.id === id)?.name).filter(Boolean);
+      laneStack.innerHTML = state.selectedOperators.map((id, index) => {
+        const op = operators.find((item) => item.id === id);
+        const progress = 28 + index * 19 + (state.running ? 17 : 0);
+        const laneCourse = courseNames[index % courseNames.length] || "No Course";
+        const status = state.paused ? "Paused" : state.running ? "Working" : "Ready";
+        return `
+          <div class="lane">
+            <div class="lane-top">
+              <div>
+                <strong>${op.title}</strong>
+                <p>${laneCourse}</p>
+              </div>
+              <span class="pill teal">${status}</span>
+            </div>
+            <div class="progress" style="margin-top: 12px;">
+              <span style="width:${Math.min(progress, 100)}%"></span>
+            </div>
+            <p style="margin-top: 10px;">
+              ${state.running ? "系统正在根据课程密度动态分派任务。" : "当前只是预览态，尚未真正进入执行。"}
+            </p>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderTickets() {
+      ticketStack.innerHTML = tickets.map((item) => `
+        <div class="ticket ${item.level}">
+          <div class="ticket-top">
+            <strong>${item.title}</strong>
+            <span class="pill ${item.level === "high" ? "orange" : item.level === "medium" ? "gold" : "teal"}">${item.pill}</span>
+          </div>
+          <p>${item.text}</p>
+        </div>
+      `).join("");
+    }
+
+    function renderFeed() {
+      const objective = getObjective();
+      const strategy = getStrategy();
+      const dynamic = {
+        title: `[16:37] Draft updated`,
+        text: `Objective=${objective.title}, Strategy=${strategy.title}, Courses=${state.selectedCourses.length}, Operators=${state.selectedOperators.length}.`
+      };
+      feedStack.innerHTML = [dynamic, ...feedItems].map((item) => `
+        <div class="feed-item">
+          <strong>${item.title}</strong>
+          <p>${item.text}</p>
+        </div>
+      `).join("");
+    }
+
+    function renderSummary() {
+      const objective = getObjective();
+      const strategy = getStrategy();
+      const courseCount = state.selectedCourses.length;
+      const opCount = state.selectedOperators.length;
+
+      document.getElementById("heroObjective").textContent = objective.title;
+      document.getElementById("heroStrategy").textContent = strategy.title;
+      document.getElementById("heroScope").textContent = `${courseCount} Courses`;
+      document.getElementById("heroSummary").textContent =
+        `${objective.text} 当前策略是 ${strategy.title}，系统会使用 ${opCount} 个 Operator 协作推进 ${courseCount} 门课程。`;
+
+      document.getElementById("estimatedFinish").textContent = objective.eta;
+      document.getElementById("forecastDone").textContent = String(objective.forecastDone);
+      document.getElementById("forecastAttention").textContent = String(objective.attention);
+      document.getElementById("forecastRisk").textContent = objective.risk;
+      document.getElementById("forecastConfidence").textContent = objective.confidence;
+      document.getElementById("operatorCount").textContent = String(opCount);
+      document.getElementById("courseCount").textContent = String(courseCount);
+      document.getElementById("attentionCount").textContent = `${objective.attention} Open`;
+      document.getElementById("campaignTitle").textContent =
+        `Campaign: ${objective.title} / ${strategy.title} / ${courseCount} Courses`;
+      document.getElementById("campaignText").textContent =
+        `目标是 ${objective.title}。策略采用 ${strategy.summary}。系统会把不确定事项推送到 Attention Queue，而不是把所有执行细节暴露给用户。`;
+      document.getElementById("heroStatus").textContent = state.running ? (state.paused ? "Paused" : "Running") : "Draft";
+      document.getElementById("liveProgress").textContent = state.running ? "52%" : "38%";
+    }
+
+    function openPreview() {
+      const objective = getObjective();
+      const strategy = getStrategy();
+      const selectedCourseNames = state.selectedCourses.map((id) => courses.find((item) => item.id === id)?.name).filter(Boolean);
+      const selectedOperatorNames = state.selectedOperators.map((id) => operators.find((item) => item.id === id)?.title).filter(Boolean);
+
+      dialogText.textContent = "这是产品层面应该展示给用户的执行承诺，不是底层脚本细节。";
+      dialogBox.textContent =
+`Campaign Summary
+Objective: ${objective.title}
+Strategy: ${strategy.title}
+Courses: ${selectedCourseNames.join(", ")}
+Operators: ${selectedOperatorNames.join(", ")}
+
+Expected Outcome
+- Finish about ${objective.forecastDone} pending items
+- Raise ${objective.attention} items to attention queue
+- Risk class ${objective.risk}
+- Confidence ${objective.confidence}
+
+Human Promise
+- The system will pause on abnormal context shifts
+- Low-confidence decisions are routed for review
+- Long-running content tasks are backgrounded automatically`;
+      overlay.classList.add("open");
+    }
+
+    function renderAll() {
+      renderObjectives();
+      renderCourses();
+      renderStrategies();
+      renderOperators();
+      renderStages();
+      renderLanes();
+      renderTickets();
+      renderFeed();
+      renderSummary();
+    }
+
+    document.getElementById("launchBtn").addEventListener("click", openPreview);
+    document.getElementById("simulateBtn").addEventListener("click", () => {
+      state.running = false;
+      state.paused = false;
+      state.liveStage = 1;
+      renderAll();
+      openPreview();
+    });
+    document.getElementById("pauseBtn").addEventListener("click", () => {
+      state.paused = !state.paused;
+      state.running = state.paused ? true : state.running;
+      renderAll();
+    });
+    document.getElementById("closeDialogBtn").addEventListener("click", () => {
+      overlay.classList.remove("open");
+    });
+    document.getElementById("confirmLaunchBtn").addEventListener("click", () => {
+      overlay.classList.remove("open");
+      state.running = true;
+      state.paused = false;
+      state.liveStage = 3;
+      renderAll();
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>

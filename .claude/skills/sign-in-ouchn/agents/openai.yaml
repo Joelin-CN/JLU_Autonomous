@@ -1,0 +1,4 @@
+interface:
+  display_name: "OUCHN Sign In"
+  short_description: "Log in to the OUCHN portal with local credentials."
+  default_prompt: "Use $sign-in-ouchn to log in to the OUCHN portal from the stored local credentials."

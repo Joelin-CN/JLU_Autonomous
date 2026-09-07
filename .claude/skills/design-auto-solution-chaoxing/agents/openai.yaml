@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Auto Solution for Chaoxing"
+  short_description: "Design automation strategy for Chaoxing course completion"
+  default_prompt: "Use $design-auto-solution-chaoxing to analyze Chaoxing (超星) course structures and design an automation strategy for completing unfinished courses."

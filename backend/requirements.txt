@@ -1,0 +1,12 @@
+# 超星学习通 Automation CLI — Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Doubao/Volcano Ark API (OpenAI-compatible)
+openai>=1.0.0
+
+# 火山引擎账户余额查询（仅 chaoxing.balance 子命令需要；
+# 须在装有此 SDK 的解释器下运行，如 Anaconda base）
+volcengine-python-sdk>=5.0.0
+
+# All other dependencies are Python standard library:
+# subprocess, json, time, re, sys, os, io, threading, pathlib, typing, argparse, base64, tempfile

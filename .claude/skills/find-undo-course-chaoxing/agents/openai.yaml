@@ -1,0 +1,4 @@
+interface:
+  display_name: "Find Unfinished Chaoxing Courses"
+  short_description: "Find Chaoxing courses below 100% progress"
+  default_prompt: "Use $find-undo-course-chaoxing to list Chaoxing (超星) courses whose 任务点进度 is below 100%."

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ask DeepSeek Question"
+  short_description: "Ask DeepSeek text or image questions via Chrome automation"
+  default_prompt: "Use $ask-deepseek-question to ask DeepSeek my question in Chrome; reuse the existing deepseek browser session when open, keep separate tabs for text and image tasks, force DeepThink and Search on in Fast mode, force DeepThink on in Image mode, upload images or the current screenshot when requested, and report the answer."
+
+policy:
+  allow_implicit_invocation: true

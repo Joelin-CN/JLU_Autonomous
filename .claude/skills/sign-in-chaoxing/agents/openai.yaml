@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chaoxing Sign In"
+  short_description: "Log in to the Chaoxing (超星学习通) platform with local credentials."
+  default_prompt: "Use $sign-in-chaoxing to log in to the Chaoxing (超星) platform from the stored local credentials."

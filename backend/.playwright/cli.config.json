@@ -1,0 +1,16 @@
+{
+  "browser": {
+    "launchOptions": {
+      "args": [
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disable-dev-shm-usage",
+        "--renderer-process-limit=2",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-sync"
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# Development-only dependencies (not needed at runtime).
+#
+# Runtime dependencies live in requirements.txt. Everything needed to run the
+# test suite and the dev helper scripts lives here:
+#   pip install -r requirements.txt -r requirements-dev.txt
+pytest>=7.0
+pillow>=9.0        # scripts/generate_captcha_images.py + image-drawing tests

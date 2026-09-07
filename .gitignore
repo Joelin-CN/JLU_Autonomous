@@ -1,0 +1,91 @@
+# ═══════════════════════════════════════════════════════════════
+#  Credentials (CRITICAL — never commit)
+# ═══════════════════════════════════════════════════════════════
+passwords/
+
+# ═══════════════════════════════════════════════════════════════
+#  Python (backend/)
+# ═══════════════════════════════════════════════════════════════
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Playwright browser profiles (large, contain logged-in credentials)
+.playwright-cli/
+# Chrome persistent profiles — contain logged-in session cookies / autofill,
+# as sensitive as the password files. Bare name matches backend/chrome-profiles
+# at any depth.
+chrome-profiles/
+# Playwright-MCP page snapshots — debug artifacts that captured live course
+# pages, including third-party (classmates') masked phone numbers and names.
+.playwright-mcp/
+
+# ═══════════════════════════════════════════════════════════════
+#  Runtime artifacts (regenerated each run — bare names match at any
+#  depth, so these cover backend/ subtree too)
+# ═══════════════════════════════════════════════════════════════
+logs/
+*.log
+screenshots/
+temp/
+output/
+backend/scripts/output/
+backend/scripts/tmp*.js
+backend/tests/phase_c_results/
+
+# ═══════════════════════════════════════════════════════════════
+#  Frontend (Node / Electron) — bare names cover frontend/ subtree
+# ═══════════════════════════════════════════════════════════════
+node_modules/
+dist/
+dist-electron/
+out/
+.vite/
+release/
+build/
+*.local
+
+# ═══════════════════════════════════════════════════════════════
+#  Editor / OS / tooling
+# ═══════════════════════════════════════════════════════════════
+**/.claude/scheduled_tasks.lock
+.codex/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ═══════════════════════════════════════════════════════════════
+#  Internal dev notes — NOT for the public repo. These contain real
+#  course ids, masked phone numbers, and account details from local
+#  development. Kept on disk for continuity, excluded from git.
+#  Public-facing docs (README, docs/design/, docs/changelog/CHANGELOG.md,
+#  docs/reports/) are committed.
+# ═══════════════════════════════════════════════════════════════
+docs/handoffs/
+docs/sessions/
+docs/changelogs/
+docs/superpowers/
+docs/prototypes/
+docs/MEMORY.md
+
+# ---- Monorepo normalization (2026-08-07) ----
+data/*
+!data/README.md
+documents/
+references/*
+!references/README.md
+backend/chaoxing_config.json
+backend/.claude/plans/
+backend/etc/
+backend/documents/
+backend/chaoxing/solvers/quiz/tmp*.js
+
+# ---- Repo foundation hardening (2026-09-07, JLU_Autonomous) ----
+# Agent-tooling workspaces (plans / task briefs stay local per machine)
+.zcode/
+.superpowers/
+.claude/plans/
+# Environment files never belong in a public repo (use *.example instead)
+.env
+.env.*

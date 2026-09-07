@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════════════════════════
+#  Credentials (CRITICAL — never commit)
+# ═══════════════════════════════════════════════════════════════
+passwords/
+
+# ═══════════════════════════════════════════════════════════════
+#  Python (backend)
+# ═══════════════════════════════════════════════════════════════
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Playwright browser profiles (large, contain logged-in credentials)
+.playwright-cli/
+# Chrome persistent profiles — contain logged-in session cookies / autofill,
+# as sensitive as the password files.
+chrome-profiles/
+
+# ═══════════════════════════════════════════════════════════════
+#  Runtime artifacts (regenerated each run — see README path table)
+# ═══════════════════════════════════════════════════════════════
+logs/
+*.log
+screenshots/
+temp/
+output/
+scripts/output/
+scripts/tmp*.js
+tests/phase_c_results/
+
+# ═══════════════════════════════════════════════════════════════
+#  Frontend (Node / Electron) — for the upcoming monorepo merge
+# ═══════════════════════════════════════════════════════════════
+node_modules/
+dist/
+dist-electron/
+out/
+.vite/
+*.local
+
+# ═══════════════════════════════════════════════════════════════
+#  Editor / OS / tooling
+# ═══════════════════════════════════════════════════════════════
+.claude/scheduled_tasks.lock
+.codex/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Real config is personal data (course ids / progress); commit the example only.
+chaoxing_config.json
+chaoxing_config.local.json

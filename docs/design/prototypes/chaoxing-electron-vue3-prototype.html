@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chaoxing Electron + Vue3 Prototype</title>
+  <style>
+    :root {
+      --bg: #f4efe5;
+      --panel: rgba(255, 251, 244, 0.84);
+      --panel-strong: #fff9f0;
+      --line: rgba(49, 61, 58, 0.14);
+      --text: #182321;
+      --muted: #5b6b67;
+      --accent: #0f766e;
+      --accent-soft: rgba(15, 118, 110, 0.12);
+      --warn: #c05a2b;
+      --warn-soft: rgba(192, 90, 43, 0.12);
+      --ok: #28704c;
+      --ok-soft: rgba(40, 112, 76, 0.12);
+      --shadow: 0 18px 46px rgba(65, 49, 25, 0.12);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+      --font-ui: "Aptos", "Segoe UI Variable", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      --font-display: "Bahnschrift", "Aptos Display", "Trebuchet MS", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-ui);
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.15), transparent 28%),
+        radial-gradient(circle at top right, rgba(192, 90, 43, 0.14), transparent 24%),
+        linear-gradient(180deg, #f7f2e9 0%, #efe6d7 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(24, 35, 33, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(24, 35, 33, 0.03) 1px, transparent 1px);
+      background-size: 24px 24px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.38), transparent 88%);
+    }
+
+    .shell {
+      width: min(1480px, calc(100% - 32px));
+      margin: 18px auto 28px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero,
+    .panel {
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      border-radius: 30px;
+      padding: 24px 26px;
+      display: grid;
+      gap: 16px;
+      margin-bottom: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -60px;
+      top: -70px;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(15, 118, 110, 0.18), transparent 68%);
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .eyebrow-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), #36a38e);
+      box-shadow: 0 0 0 8px rgba(15, 118, 110, 0.08);
+    }
+
+    h1 {
+      margin: 8px 0 8px;
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .subtitle {
+      margin: 0;
+      max-width: 860px;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--muted);
+    }
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stat-card {
+      padding: 16px 18px;
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid rgba(24, 35, 33, 0.06);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .stat-value {
+      margin-top: 8px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr 360px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .panel {
+      border-radius: var(--radius-xl);
+      padding: 20px;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0.01em;
+    }
+
+    .panel-title small {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mode-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.52);
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .mode-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(15, 118, 110, 0.35);
+    }
+
+    .mode-card.active {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.16), rgba(255, 255, 255, 0.72));
+      border-color: rgba(15, 118, 110, 0.42);
+    }
+
+    .mode-name {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .mode-desc {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+      min-height: 38px;
+    }
+
+    .mode-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid transparent;
+      background: rgba(24, 35, 33, 0.06);
+      color: var(--muted);
+    }
+
+    .tag.readonly {
+      background: rgba(24, 35, 33, 0.07);
+    }
+
+    .tag.live {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .tag.safe {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .form-block {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(24, 35, 33, 0.08);
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .input,
+    .select,
+    .toggle-pill,
+    .account-pill {
+      border: 1px solid rgba(24, 35, 33, 0.1);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--text);
+      border-radius: 12px;
+      transition: all 140ms ease;
+    }
+
+    .input,
+    .select {
+      width: 100%;
+      padding: 12px 13px;
+      font: inherit;
+      outline: none;
+    }
+
+    .input:focus,
+    .select:focus {
+      border-color: rgba(15, 118, 110, 0.42);
+      box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.08);
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .account-pill,
+    .toggle-pill {
+      cursor: pointer;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .account-pill.active,
+    .toggle-pill.active {
+      background: rgba(15, 118, 110, 0.14);
+      border-color: rgba(15, 118, 110, 0.34);
+      color: var(--accent);
+    }
+
+    .subnote {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .preview-box {
+      border-radius: 18px;
+      background: #17201f;
+      color: #d9f3ec;
+      padding: 16px;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      min-height: 112px;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      padding: 12px 16px;
+      border-radius: 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent), #2b9b8a);
+      color: white;
+      box-shadow: 0 10px 24px rgba(15, 118, 110, 0.28);
+    }
+
+    .btn.secondary {
+      background: rgba(255, 255, 255, 0.74);
+      color: var(--text);
+      border: 1px solid rgba(24, 35, 33, 0.1);
+    }
+
+    .btn.warn {
+      background: rgba(192, 90, 43, 0.14);
+      color: var(--warn);
+      border: 1px solid rgba(192, 90, 43, 0.24);
+    }
+
+    .btn.ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px dashed rgba(24, 35, 33, 0.14);
+    }
+
+    .runtime-banner {
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(255, 255, 255, 0.68));
+      border: 1px solid rgba(15, 118, 110, 0.18);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .runtime-banner.warn {
+      background: linear-gradient(135deg, rgba(192, 90, 43, 0.12), rgba(255, 255, 255, 0.68));
+      border-color: rgba(192, 90, 43, 0.18);
+    }
+
+    .runtime-banner strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .runtime-banner p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .phase-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .phase-item {
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 13px 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.56);
+      border: 1px solid rgba(24, 35, 33, 0.08);
+    }
+
+    .phase-index {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: rgba(24, 35, 33, 0.08);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .phase-item.done .phase-index {
+      background: rgba(40, 112, 76, 0.16);
+      color: var(--ok);
+    }
+
+    .phase-item.active .phase-index {
+      background: rgba(15, 118, 110, 0.18);
+      color: var(--accent);
+    }
+
+    .phase-main strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .phase-main span {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .phase-status {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .lane-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .lane-card {
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.56);
+      border: 1px solid rgba(24, 35, 33, 0.08);
+      display: grid;
+      gap: 10px;
+    }
+
+    .lane-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .lane-name {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .lane-chip {
+      font-size: 11px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: rgba(24, 35, 33, 0.08);
+      color: var(--muted);
+    }
+
+    .meter {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(24, 35, 33, 0.08);
+      overflow: hidden;
+    }
+
+    .meter > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), #4bb29f);
+    }
+
+    .lane-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .course-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .course-item {
+      padding: 15px;
+      border-radius: 18px;
+      border: 1px solid rgba(24, 35, 33, 0.08);
+      background: rgba(255, 255, 255, 0.56);
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease;
+    }
+
+    .course-item:hover {
+      transform: translateY(-1px);
+    }
+
+    .course-item.active {
+      border-color: rgba(15, 118, 110, 0.34);
+      background: rgba(15, 118, 110, 0.1);
+    }
+
+    .course-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .course-item p {
+      margin: 8px 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .detail-sheet {
+      padding: 16px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.52));
+      border: 1px solid rgba(24, 35, 33, 0.08);
+      margin-top: 14px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .detail-header strong {
+      font-size: 18px;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mini-card {
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(24, 35, 33, 0.05);
+    }
+
+    .mini-card .num {
+      font-size: 20px;
+      font-weight: 800;
+      margin-top: 6px;
+    }
+
+    .detail-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .detail-section {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.64);
+      border: 1px solid rgba(24, 35, 33, 0.06);
+    }
+
+    .detail-section h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .detail-section ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .detail-section li {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed rgba(24, 35, 33, 0.08);
+    }
+
+    .detail-section li:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .log-panel {
+      margin-top: 18px;
+      border-radius: 30px;
+    }
+
+    .log-screen {
+      border-radius: 20px;
+      background: #131a19;
+      color: #d6f4ec;
+      padding: 18px;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      min-height: 220px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .log-screen .muted {
+      color: #8aa9a0;
+    }
+
+    .log-screen .warn {
+      color: #ffbe8a;
+    }
+
+    .log-screen .ok {
+      color: #9ce4b2;
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(13, 18, 17, 0.48);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 9;
+    }
+
+    .overlay.open {
+      display: flex;
+    }
+
+    .dialog {
+      width: min(560px, 100%);
+      border-radius: 28px;
+      padding: 24px;
+      background: rgba(255, 250, 243, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      box-shadow: 0 24px 60px rgba(13, 18, 17, 0.24);
+    }
+
+    .dialog h3 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-family: var(--font-display);
+    }
+
+    .dialog p {
+      margin: 0;
+      line-height: 1.65;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .dialog .action-row {
+      margin-top: 18px;
+      justify-content: flex-end;
+    }
+
+    @media (max-width: 1180px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-stats,
+      .lane-grid,
+      .detail-columns,
+      .mini-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(100% - 16px, 100%);
+        margin: 8px auto 18px;
+      }
+
+      .hero,
+      .panel {
+        border-radius: 22px;
+        padding: 16px;
+      }
+
+      .hero-top {
+        flex-direction: column;
+      }
+
+      .mode-grid,
+      .hero-stats,
+      .lane-grid,
+      .mini-grid,
+      .detail-columns {
+        grid-template-columns: 1fr;
+      }
+
+      .panel-title {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">
+            <span class="eyebrow-dot"></span>
+            Electron + Vue3 交互原型
+          </div>
+          <h1>把当前脚本流程包装成一个可控的桌面编排台</h1>
+          <p class="subtitle">
+            这个原型按你现在的脚本模型做等价映射：命令模式、账号并行、课程扫描、答题/内容双阶段、确认门、暂停/安全退出、日志与进度都保留。它不是最终视觉稿，而是为了先确认交互骨架。
+          </p>
+        </div>
+        <div class="pill-row">
+          <span class="tag safe">会话隔离</span>
+          <span class="tag safe">多账号并行</span>
+          <span class="tag live">确认门</span>
+          <span class="tag safe">可暂停/退出</span>
+        </div>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-card">
+          <div class="stat-label">当前模式</div>
+          <div class="stat-value" id="heroModeValue">full-auto</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">运行账户</div>
+          <div class="stat-value" id="heroAccountValue">1</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">目标课程</div>
+          <div class="stat-value" id="heroCourseValue">1 门</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">AI 后端</div>
+          <div class="stat-value" id="heroAiValue">Doubao</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>运行配置</h2>
+            <small>对标 `chaoxing_cli.ps1` 入口</small>
+          </div>
+          <div class="mode-grid" id="modeGrid"></div>
+
+          <div class="form-block">
+            <div class="field">
+              <label>账号选择</label>
+              <div class="pill-row" id="accountPills"></div>
+              <div class="subnote">建议 Electron 前端只做“选择 + 展示”，真正的线程/子进程管理仍放在主进程。</div>
+            </div>
+
+            <div class="field">
+              <label>课程筛选</label>
+              <select class="select" id="courseSelect"></select>
+            </div>
+
+            <div class="field">
+              <label>AI Provider</label>
+              <div class="pill-row">
+                <button class="toggle-pill" data-ai="doubao-api">Doubao API</button>
+                <button class="toggle-pill" data-ai="deepseek-web">DeepSeek Web</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>批量测试起点</label>
+              <input class="input" id="batchFrom" value="2.7" />
+            </div>
+
+            <div class="field">
+              <label>运行开关</label>
+              <div class="pill-row" id="togglePills"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>命令映射</h2>
+            <small>前端状态 -> 后端调用</small>
+          </div>
+          <div class="preview-box" id="commandPreview"></div>
+          <div class="action-row">
+            <button class="btn primary" id="startBtn">启动任务</button>
+            <button class="btn secondary" id="pauseBtn">暂停 / 继续</button>
+            <button class="btn warn" id="stopBtn">安全退出</button>
+            <button class="btn ghost" id="mockScanBtn">模拟扫描</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>执行编排</h2>
+            <small>对标 orchestrator 的 phase 流程</small>
+          </div>
+
+          <div class="runtime-banner" id="runtimeBanner">
+            <div>
+              <strong id="runtimeTitle">等待启动</strong>
+              <p id="runtimeText">当前还没有任务在运行。点击“启动任务”会先走确认门，再切入会话/扫描/执行阶段。</p>
+            </div>
+            <span class="tag safe" id="runtimeTag">Idle</span>
+          </div>
+
+          <div class="phase-list" id="phaseList"></div>
+
+          <div class="panel-title" style="margin-top: 18px;">
+            <h2>账号执行泳道</h2>
+            <small>会话名与线程一一对应</small>
+          </div>
+          <div class="lane-grid" id="laneGrid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>课程视图</h2>
+            <small>对标 scan + discovered state</small>
+          </div>
+          <div class="course-list" id="courseList"></div>
+          <div class="detail-sheet" id="courseDetail"></div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>前端建议</h2>
+            <small>给 Electron + Vue3 的拆分方式</small>
+          </div>
+          <div class="detail-section">
+            <h3>渲染层</h3>
+            <ul>
+              <li><span>配置页做成一个 Job Form</span><span>不要直接耦合脚本参数</span></li>
+              <li><span>运行页做成实时面板</span><span>日志、阶段、账号卡同步刷新</span></li>
+              <li><span>课程页保留扫描快照</span><span>支持从快照恢复</span></li>
+            </ul>
+          </div>
+          <div class="detail-section" style="margin-top: 12px;">
+            <h3>主进程</h3>
+            <ul>
+              <li><span>统一管理 Python 子进程</span><span>spawn / pause / stop / stdout</span></li>
+              <li><span>持久化任务状态</span><span>对应 `output/*.json`</span></li>
+              <li><span>IPC 只暴露明确动作</span><span>`runJob`, `pauseJob`, `loadStatus`</span></li>
+            </ul>
+          </div>
+          <div class="detail-section" style="margin-top: 12px;">
+            <h3>高风险点</h3>
+            <ul>
+              <li><span>不要让前端直接拼 shell 字符串</span><span>统一由后端组装参数</span></li>
+              <li><span>多账号并行要显式展示会话名</span><span>`chaoxing-chrome-N`</span></li>
+              <li><span>batch-test 建议补一个纯 Python API 层</span><span>别长期绑死在 PS1</span></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>确认门</h2>
+            <small>保留你现有的安全语义</small>
+          </div>
+          <div class="detail-section">
+            <h3 id="confirmLevelTitle">当前为二级确认</h3>
+            <ul id="confirmList"></ul>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <section class="panel log-panel">
+      <div class="panel-title">
+        <h2>实时日志</h2>
+        <small>这里未来直接接 Python stdout / stderr</small>
+      </div>
+      <div class="log-screen" id="logScreen"></div>
+    </section>
+  </div>
+
+  <div class="overlay" id="confirmOverlay">
+    <div class="dialog">
+      <h3 id="dialogTitle">确认执行</h3>
+      <p id="dialogText"></p>
+      <div class="preview-box" id="dialogCommand" style="margin-top: 16px; min-height: 82px;"></div>
+      <div class="action-row">
+        <button class="btn secondary" id="cancelConfirmBtn">取消</button>
+        <button class="btn primary" id="acceptConfirmBtn">确认执行</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const modeMeta = {
+      status: {
+        label: "status",
+        desc: "查看账号会话、聚合课程进度，不触发真实执行。",
+        tags: ["只读"],
+        readOnly: true,
+        phases: [
+          ["会话检测", "检查 playwright 会话是否存在"],
+          ["状态汇总", "聚合课程数与总进度"],
+        ],
+      },
+      scan: {
+        label: "scan",
+        desc: "登录并扫描未完成课程、章节树、剩余任务点。",
+        tags: ["只读", "可恢复"],
+        readOnly: true,
+        phases: [
+          ["登录检查", "会话失效时自动补登录"],
+          ["课程发现", "抓取未完成课程列表"],
+          ["章节扫描", "构建 discovered state"],
+        ],
+      },
+      "solve-quiz": {
+        label: "solve-quiz",
+        desc: "只跑章节测验，对应 `--quiz-only`。",
+        tags: ["提交", "确认"],
+        readOnly: false,
+        phases: [
+          ["登录检查", "准备账号会话"],
+          ["课程发现", "扫描剩余测验章节"],
+          ["答题引擎", "字体解密 -> 文本/截图 -> AI 解题"],
+          ["成绩校验", "读取分数并决定重试"],
+        ],
+      },
+      "complete-content": {
+        label: "complete-content",
+        desc: "只跑视频/文档内容，对应 `--content-only`。",
+        tags: ["提交", "确认"],
+        readOnly: false,
+        phases: [
+          ["登录检查", "准备账号会话"],
+          ["课程发现", "扫描剩余内容章节"],
+          ["内容播放", "视频/文档/音频顺序完成"],
+          ["反爬处理", "验证码识别与兜底"],
+        ],
+      },
+      "full-auto": {
+        label: "full-auto",
+        desc: "登录 -> 扫描 -> 测验 -> 内容 -> 最终校验。",
+        tags: ["提交", "全流程"],
+        readOnly: false,
+        phases: [
+          ["登录检查", "ensure_logged_in"],
+          ["课程发现", "scan_courses + scan_course_sections"],
+          ["答题阶段", "ChapterQuizSolver.run()"],
+          ["内容阶段", "ChapterContentBot.run()"],
+          ["最终校验", "回到课程页确认完成度"],
+        ],
+      },
+      "batch-test": {
+        label: "batch-test",
+        desc: "Phase C 批量成绩验证，验证多个章节的 AI 解题准确率。",
+        tags: ["提交", "实验性"],
+        readOnly: false,
+        phases: [
+          ["登录检查", "账号与课程定位"],
+          ["章节导航", "从起始节开始批量切换"],
+          ["作答评分", "grade-only 验证准确率"],
+          ["失败熔断", "连续失败后停止当前账号"],
+        ],
+      },
+    };
+
+    const accounts = [
+      { id: 0, name: "账号 0", mask: "132****3918" },
+      { id: 1, name: "账号 1", mask: "187****2240" },
+      { id: 2, name: "账号 2", mask: "139****8831" },
+    ];
+
+    const courses = [
+      {
+        id: "gailv",
+        name: "概率论与数理统计",
+        teacher: "示例教师 A",
+        progress: 79,
+        total: 100,
+        quizCount: 16,
+        contentCount: 4,
+        chapters: 9,
+        quizSections: ["1.6", "1.7", "2.6", "2.7", "3.7", "3.8"],
+        contentSections: ["1.8", "5.5", "7.7", "9.4"],
+      },
+      {
+        id: "physics",
+        name: "大学物理ABC（下）",
+        teacher: "示例教师 B",
+        progress: 0,
+        total: 88,
+        quizCount: 0,
+        contentCount: 29,
+        chapters: 7,
+        quizSections: [],
+        contentSections: ["1.1", "1.2", "2.1", "3.1", "4.2", "6.3"],
+      },
+      {
+        id: "english",
+        name: "综合英语-2025",
+        teacher: "示例教师 C",
+        progress: 0,
+        total: 77,
+        quizCount: 0,
+        contentCount: 20,
+        chapters: 5,
+        quizSections: [],
+        contentSections: ["Unit 1-1", "Unit 1-2", "Unit 2-1", "Unit 3-1"],
+      },
+    ];
+
+    const confirmLevels = {
+      status: ["无需确认", "直接读取会话状态", "不触发提交流程"],
+      scan: ["无需确认", "只执行扫描与快照持久化", "不触发答题/播放"],
+      "solve-quiz": ["一级确认", "展示执行摘要", "确认后进入真实答题流程"],
+      "complete-content": ["一级确认", "展示执行摘要", "确认后进入真实内容流程"],
+      "full-auto": ["二级确认", "前端确认一次", "后端 live 模式再确认一次"],
+      "batch-test": ["一级确认", "展示起始章节和目标账号", "评分失败支持熔断停止"],
+    };
+
+    const state = {
+      mode: "full-auto",
+      allAccounts: false,
+      selectedAccounts: [0],
+      courseId: courses[0].id,
+      aiProvider: "doubao-api",
+      batchFrom: "2.7",
+      headed: true,
+      dryRun: false,
+      resume: false,
+      running: false,
+      paused: false,
+      stopping: false,
+      activeCourseId: courses[0].id,
+      phaseIndex: -1,
+      logLines: [
+        "[15:08:11] [INFO] Prototype ready. Renderer state is detached from backend execution.",
+        "[15:08:12] [INFO] 建议最终使用 Electron 主进程托管 Python 子进程与 stdout 订阅。",
+        "[15:08:13] [INFO] 这个原型模拟的是脚本等价交互，不是最终 API 设计。",
+      ],
+    };
+
+    const modeGrid = document.getElementById("modeGrid");
+    const accountPills = document.getElementById("accountPills");
+    const courseSelect = document.getElementById("courseSelect");
+    const togglePills = document.getElementById("togglePills");
+    const phaseList = document.getElementById("phaseList");
+    const laneGrid = document.getElementById("laneGrid");
+    const courseList = document.getElementById("courseList");
+    const courseDetail = document.getElementById("courseDetail");
+    const commandPreview = document.getElementById("commandPreview");
+    const logScreen = document.getElementById("logScreen");
+    const confirmList = document.getElementById("confirmList");
+    const confirmLevelTitle = document.getElementById("confirmLevelTitle");
+    const runtimeBanner = document.getElementById("runtimeBanner");
+    const runtimeTitle = document.getElementById("runtimeTitle");
+    const runtimeText = document.getElementById("runtimeText");
+    const runtimeTag = document.getElementById("runtimeTag");
+    const confirmOverlay = document.getElementById("confirmOverlay");
+    const dialogTitle = document.getElementById("dialogTitle");
+    const dialogText = document.getElementById("dialogText");
+    const dialogCommand = document.getElementById("dialogCommand");
+    const heroModeValue = document.getElementById("heroModeValue");
+    const heroAccountValue = document.getElementById("heroAccountValue");
+    const heroCourseValue = document.getElementById("heroCourseValue");
+    const heroAiValue = document.getElementById("heroAiValue");
+
+    const toggleDefs = [
+      { key: "headed", label: "显示浏览器" },
+      { key: "dryRun", label: "Dry Run" },
+      { key: "resume", label: "Resume" },
+      { key: "allAccounts", label: "全部账号" },
+    ];
+
+    function pushLog(level, message) {
+      const now = new Date();
+      const ts = now.toLocaleTimeString("zh-CN", { hour12: false });
+      state.logLines.unshift(`[${ts}] [${level}] ${message}`);
+      state.logLines = state.logLines.slice(0, 18);
+      renderLogs();
+    }
+
+    function selectedCourse() {
+      return courses.find((item) => item.id === state.courseId) || courses[0];
+    }
+
+    function activeCourse() {
+      return courses.find((item) => item.id === state.activeCourseId) || courses[0];
+    }
+
+    function selectedAccounts() {
+      return state.allAccounts ? accounts : accounts.filter((item) => state.selectedAccounts.includes(item.id));
+    }
+
+    function buildCommandPreview() {
+      const course = selectedCourse();
+      const args = [];
+      let command = "python scripts/chaoxing_orchestrator.py";
+
+      if (state.mode === "status") args.push("--status");
+      if (state.mode === "scan") args.push("--scan-only");
+      if (state.mode === "solve-quiz") args.push("--quiz-only");
+      if (state.mode === "complete-content") args.push("--content-only");
+
+      if (state.mode === "batch-test") {
+        command = "powershell -ExecutionPolicy Bypass -File chaoxing_cli.ps1 batch-test";
+        args.push(`-From "${state.batchFrom || "2.7"}"`);
+        if (state.headed) args.push("-Headed");
+        if (state.allAccounts) {
+          args.push("-AllAccounts");
+        } else {
+          args.push(`-Account ${selectedAccounts()[0]?.id ?? 0}`);
+        }
+      } else {
+        if (course && state.mode !== "status") args.push(`--course "${course.name}"`);
+        if (state.allAccounts) {
+          args.push("--all-accounts");
+        } else {
+          args.push(`--account ${selectedAccounts()[0]?.id ?? 0}`);
+        }
+        if (state.dryRun) args.push("--dry-run");
+        if (state.resume) args.push("--resume");
+        if (!modeMeta[state.mode].readOnly) args.push("--yes  # 建议 GUI 确认后再加");
+      }
+
+      const envLine = `env: CHAOXING_HEADED=${state.headed ? 1 : 0}, provider=${state.aiProvider}, session=${state.allAccounts ? "chaoxing-chrome-N" : `chaoxing-chrome-${selectedAccounts()[0]?.id ?? 0}`}`;
+      const noteLine = state.mode === "batch-test"
+        ? "note: batch-test 目前仍部分依赖 PS1 路由，建议后续补成纯 Python 服务接口。"
+        : "note: GUI 应传结构化 job payload，由主进程再安全拼参数。";
+
+      return `${command} ${args.join(" ")}\n${envLine}\n${noteLine}`;
+    }
+
+    function renderModes() {
+      modeGrid.innerHTML = Object.entries(modeMeta).map(([key, meta]) => `
+        <button class="mode-card ${state.mode === key ? "active" : ""}" data-mode="${key}">
+          <div class="mode-name">${meta.label}</div>
+          <div class="mode-desc">${meta.desc}</div>
+          <div class="mode-tags">
+            ${(meta.tags || []).map((tag) => {
+              const cls = tag === "只读" ? "readonly" : tag === "提交" || tag === "确认" ? "live" : "safe";
+              return `<span class="tag ${cls}">${tag}</span>`;
+            }).join("")}
+          </div>
+        </button>
+      `).join("");
+
+      modeGrid.querySelectorAll("[data-mode]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.mode = button.dataset.mode;
+          state.phaseIndex = -1;
+          pushLog("INFO", `切换模式 -> ${state.mode}`);
+          render();
+        });
+      });
+    }
+
+    function renderAccounts() {
+      accountPills.innerHTML = accounts.map((account) => `
+        <button class="account-pill ${state.allAccounts ? "" : state.selectedAccounts.includes(account.id) ? "active" : ""}" data-account="${account.id}">
+          ${account.name}
+        </button>
+      `).join("");
+
+      accountPills.querySelectorAll("[data-account]").forEach((button) => {
+        button.addEventListener("click", () => {
+          if (state.allAccounts) return;
+          state.selectedAccounts = [Number(button.dataset.account)];
+          pushLog("INFO", `选中账号 -> ${button.textContent.trim()}`);
+          render();
+        });
+      });
+    }
+
+    function renderCourseSelect() {
+      courseSelect.innerHTML = courses.map((course) => `
+        <option value="${course.id}" ${state.courseId === course.id ? "selected" : ""}>${course.name}</option>
+      `).join("");
+      courseSelect.disabled = state.mode === "status";
+      courseSelect.addEventListener("change", (event) => {
+        state.courseId = event.target.value;
+        state.activeCourseId = event.target.value;
+        pushLog("INFO", `目标课程 -> ${selectedCourse().name}`);
+        render();
+      });
+    }
+
+    function renderAiPills() {
+      document.querySelectorAll("[data-ai]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.ai === state.aiProvider);
+        button.onclick = () => {
+          state.aiProvider = button.dataset.ai;
+          pushLog("INFO", `AI Provider -> ${button.textContent.trim()}`);
+          render();
+        };
+      });
+    }
+
+    function renderToggles() {
+      togglePills.innerHTML = toggleDefs.map((toggle) => `
+        <button class="toggle-pill ${state[toggle.key] ? "active" : ""}" data-toggle="${toggle.key}">${toggle.label}</button>
+      `).join("");
+
+      togglePills.querySelectorAll("[data-toggle]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.toggle;
+          state[key] = !state[key];
+          if (key === "allAccounts" && state.allAccounts) {
+            state.selectedAccounts = [0];
+          }
+          pushLog("INFO", `切换 ${button.textContent.trim()} -> ${state[key] ? "ON" : "OFF"}`);
+          render();
+        });
+      });
+    }
+
+    function renderPhases() {
+      const phases = modeMeta[state.mode].phases;
+      phaseList.innerHTML = phases.map((phase, index) => {
+        const done = state.running && index < state.phaseIndex;
+        const active = state.running && index === state.phaseIndex;
+        const status = done ? "完成" : active ? (state.paused ? "暂停中" : "执行中") : "等待";
+        return `
+          <div class="phase-item ${done ? "done" : ""} ${active ? "active" : ""}">
+            <div class="phase-index">${index + 1}</div>
+            <div class="phase-main">
+              <strong>${phase[0]}</strong>
+              <span>${phase[1]}</span>
+            </div>
+            <div class="phase-status">${status}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderLanes() {
+      const lanes = selectedAccounts();
+      const course = selectedCourse();
+      laneGrid.innerHTML = lanes.map((account, index) => {
+        const active = state.running ? Math.min(100, 14 + (state.phaseIndex + 1) * 18 + index * 6) : 8;
+        const status = state.stopping ? "退出中" : state.paused ? "暂停" : state.running ? "运行中" : "待机";
+        const stage = modeMeta[state.mode].phases[Math.max(state.phaseIndex, 0)]?.[0] || "待启动";
+        return `
+          <div class="lane-card">
+            <div class="lane-head">
+              <div>
+                <div class="lane-name">${account.name}</div>
+                <div class="subnote">${account.mask} · session = chaoxing-chrome-${account.id}</div>
+              </div>
+              <span class="lane-chip">${status}</span>
+            </div>
+            <div class="meter"><span style="width:${active}%"></span></div>
+            <div class="lane-meta">
+              <span>${course.name}</span>
+              <span>${active}%</span>
+            </div>
+            <div class="subnote">当前阶段：${stage}${state.mode === "batch-test" ? ` · 起点 ${state.batchFrom}` : ""}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderCourses() {
+      courseList.innerHTML = courses.map((course) => {
+        const percent = course.total ? Math.round((course.progress / course.total) * 100) : 0;
+        return `
+          <button class="course-item ${state.activeCourseId === course.id ? "active" : ""}" data-course-card="${course.id}">
+            <div class="course-title">
+              <span>${course.name}</span>
+              <span>${course.progress}/${course.total}</span>
+            </div>
+            <p>${course.teacher} · ${course.chapters} 章 · 测验 ${course.quizCount} · 内容 ${course.contentCount}</p>
+            <div class="meter"><span style="width:${percent}%"></span></div>
+          </button>
+        `;
+      }).join("");
+
+      courseList.querySelectorAll("[data-course-card]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.activeCourseId = button.dataset.courseCard;
+          renderCourseDetail();
+        });
+      });
+    }
+
+    function renderCourseDetail() {
+      const course = activeCourse();
+      const percent = course.total ? Math.round((course.progress / course.total) * 100) : 0;
+      courseDetail.innerHTML = `
+        <div class="detail-header">
+          <div>
+            <strong>${course.name}</strong>
+            <div class="subnote">${course.teacher} · 预计作为 discovered state / progress state 的主展示对象</div>
+          </div>
+          <span class="tag safe">${percent}%</span>
+        </div>
+        <div class="mini-grid">
+          <div class="mini-card">
+            <div class="subnote">章节数</div>
+            <div class="num">${course.chapters}</div>
+          </div>
+          <div class="mini-card">
+            <div class="subnote">剩余测验</div>
+            <div class="num">${course.quizCount}</div>
+          </div>
+          <div class="mini-card">
+            <div class="subnote">剩余内容</div>
+            <div class="num">${course.contentCount}</div>
+          </div>
+        </div>
+        <div class="detail-columns">
+          <div class="detail-section">
+            <h3>Quiz Sections</h3>
+            <ul>
+              ${(course.quizSections.length ? course.quizSections : ["当前课程无剩余测验"]).map((section, index) => `
+                <li><span>${index + 1}. ${section}</span><span>${state.aiProvider === "deepseek-web" ? "图文双模" : "HTTP 快答"}</span></li>
+              `).join("")}
+            </ul>
+          </div>
+          <div class="detail-section">
+            <h3>Content Sections</h3>
+            <ul>
+              ${(course.contentSections.length ? course.contentSections : ["当前课程无剩余内容"]).map((section, index) => `
+                <li><span>${index + 1}. ${section}</span><span>顺序播放 / 自动推进</span></li>
+              `).join("")}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPreview() {
+      commandPreview.textContent = buildCommandPreview();
+    }
+
+    function renderLogs() {
+      logScreen.innerHTML = state.logLines.map((line) => {
+        if (line.includes("[WARN]")) return `<span class="warn">${line}</span>`;
+        if (line.includes("[OK]")) return `<span class="ok">${line}</span>`;
+        if (line.includes("[INFO]")) return `<span class="muted">${line}</span>`;
+        return line;
+      }).join("\n");
+    }
+
+    function renderConfirm() {
+      const lines = confirmLevels[state.mode];
+      confirmLevelTitle.textContent = `当前为${lines[0]}`;
+      confirmList.innerHTML = lines.map((item) => `<li><span>${item}</span><span></span></li>`).join("");
+    }
+
+    function renderRuntime() {
+      runtimeBanner.classList.toggle("warn", !modeMeta[state.mode].readOnly && !state.dryRun);
+      if (state.stopping) {
+        runtimeTitle.textContent = "等待安全退出";
+        runtimeText.textContent = "当前模拟的是脚本里的 graceful quit 语义，前端发 stop，后端在安全点退出。";
+        runtimeTag.textContent = "Stopping";
+        runtimeTag.className = "tag live";
+        return;
+      }
+      if (state.paused) {
+        runtimeTitle.textContent = "任务已暂停";
+        runtimeText.textContent = "这对应现有 `.pause_flag` 语义。建议 Electron 不再靠文件，而改为主进程内存信号或 IPC。";
+        runtimeTag.textContent = "Paused";
+        runtimeTag.className = "tag readonly";
+        return;
+      }
+      if (state.running) {
+        runtimeTitle.textContent = `${modeMeta[state.mode].label} 正在执行`;
+        runtimeText.textContent = modeMeta[state.mode].readOnly
+          ? "当前是只读路径，主要展示扫描/状态结果。"
+          : state.dryRun
+            ? "当前是 Dry Run，结构走全流程，但不做真实提交。"
+            : "当前是 Live 路径，会进入真实答题/内容执行。";
+        runtimeTag.textContent = state.dryRun ? "Dry Run" : "Running";
+        runtimeTag.className = state.dryRun ? "tag safe" : "tag live";
+        return;
+      }
+      runtimeTitle.textContent = "等待启动";
+      runtimeText.textContent = "当前还没有任务在运行。点击“启动任务”会先走确认门，再切入会话/扫描/执行阶段。";
+      runtimeTag.textContent = "Idle";
+      runtimeTag.className = "tag safe";
+    }
+
+    function renderHero() {
+      heroModeValue.textContent = modeMeta[state.mode].label;
+      heroAccountValue.textContent = String(selectedAccounts().length);
+      heroCourseValue.textContent = state.mode === "status" ? "全部状态" : "1 门";
+      heroAiValue.textContent = state.aiProvider === "doubao-api" ? "Doubao" : "DeepSeek";
+    }
+
+    function render() {
+      renderModes();
+      renderAccounts();
+      renderToggles();
+      renderAiPills();
+      renderPreview();
+      renderPhases();
+      renderLanes();
+      renderCourses();
+      renderCourseDetail();
+      renderLogs();
+      renderConfirm();
+      renderRuntime();
+      renderHero();
+      document.getElementById("batchFrom").value = state.batchFrom;
+    }
+
+    function openConfirm() {
+      const course = selectedCourse();
+      const accountText = state.allAccounts ? `全部 ${accounts.length} 个账号` : `账号 ${selectedAccounts()[0]?.id ?? 0}`;
+      const mode = modeMeta[state.mode];
+
+      if (mode.readOnly) {
+        state.running = true;
+        state.paused = false;
+        state.stopping = false;
+        state.phaseIndex = 0;
+        pushLog("INFO", `${mode.label} 已启动（只读模式）`);
+        render();
+        simulateRun();
+        return;
+      }
+
+      dialogTitle.textContent = `确认执行 ${mode.label}`;
+      dialogText.textContent = `${accountText} · ${course.name}${state.mode === "batch-test" ? ` · 从 ${state.batchFrom} 开始` : ""}。${state.dryRun ? "当前为 Dry Run。" : "当前为 Live 模式，会触发真实执行。"}`
+      dialogCommand.textContent = buildCommandPreview();
+      confirmOverlay.classList.add("open");
+    }
+
+    function simulateRun() {
+      const phases = modeMeta[state.mode].phases;
+      let index = 0;
+      const timer = setInterval(() => {
+        if (!state.running || state.paused || state.stopping) return;
+        state.phaseIndex = index;
+        const current = phases[index];
+        pushLog("INFO", `阶段进入 -> ${current[0]} / ${current[1]}`);
+        render();
+        index += 1;
+        if (index >= phases.length) {
+          clearInterval(timer);
+          setTimeout(() => {
+            state.running = false;
+            state.phaseIndex = phases.length;
+            pushLog("OK", `${modeMeta[state.mode].label} 完成。建议下一步把这套交互转成 Vue3 组件树。`);
+            render();
+          }, 720);
+        }
+      }, 1250);
+    }
+
+    document.getElementById("startBtn").addEventListener("click", openConfirm);
+    document.getElementById("pauseBtn").addEventListener("click", () => {
+      if (!state.running) {
+        pushLog("WARN", "当前没有运行中的任务。");
+        return;
+      }
+      state.paused = !state.paused;
+      pushLog("INFO", state.paused ? "收到暂停信号。" : "恢复执行。");
+      render();
+    });
+    document.getElementById("stopBtn").addEventListener("click", () => {
+      if (!state.running) {
+        pushLog("WARN", "当前没有运行中的任务。");
+        return;
+      }
+      state.stopping = true;
+      pushLog("WARN", "发送安全退出信号，等待后端在安全点停止。");
+      render();
+      setTimeout(() => {
+        state.running = false;
+        state.paused = false;
+        state.stopping = false;
+        state.phaseIndex = -1;
+        pushLog("OK", "任务已安全退出。");
+        render();
+      }, 1200);
+    });
+    document.getElementById("mockScanBtn").addEventListener("click", () => {
+      state.mode = "scan";
+      state.running = true;
+      state.paused = false;
+      state.stopping = false;
+      state.phaseIndex = 0;
+      pushLog("INFO", "触发模拟扫描：课程发现快照会刷新到课程视图。");
+      render();
+      simulateRun();
+    });
+    document.getElementById("batchFrom").addEventListener("input", (event) => {
+      state.batchFrom = event.target.value.trim();
+      renderPreview();
+    });
+    document.getElementById("cancelConfirmBtn").addEventListener("click", () => {
+      confirmOverlay.classList.remove("open");
+    });
+    document.getElementById("acceptConfirmBtn").addEventListener("click", () => {
+      confirmOverlay.classList.remove("open");
+      state.running = true;
+      state.paused = false;
+      state.stopping = false;
+      state.phaseIndex = 0;
+      pushLog("INFO", `${modeMeta[state.mode].label} 已确认启动。`);
+      render();
+      simulateRun();
+    });
+
+    renderCourseSelect();
+    render();
+  </script>
+</body>
+</html>

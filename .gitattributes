@@ -1,0 +1,11 @@
+# Normalize line endings for text files
+* text=auto
+
+# Explicitly keep binary assets
+*.png binary
+*.jpg binary
+*.pdf binary
+*.exe binary
+*.ico binary
+*.woff binary
+*.woff2 binary
