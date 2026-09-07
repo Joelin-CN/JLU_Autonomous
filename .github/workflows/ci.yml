@@ -32,15 +32,17 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Install playwright-cli
-        # 单测中的 engine/submitter 用例在 mock 前会 shutil.which() 自检 playwright-cli
-        run: npm install -g playwright-cli
+        # 单测中的 engine/submitter 用例在 mock 前会 shutil.which() 自检 playwright-cli。
+        # 注意装 @playwright/cli：npm 上的 playwright-cli 是无 bin 的废弃存根包，
+        # 开发机上实际可执行文件由 @playwright/cli 提供。
+        run: npm install -g @playwright/cli
 
       - name: Prepare runtime environment
         # 全新克隆没有 git 忽略的运行时前提（开发机上天然存在）：
         # 1) backend/chaoxing_config.json —— 从跟踪的 example 复制
         # 2) 仓库根 data/{temp,output,logs} 运行时目录
-        # 3) data/passwords/chaoxing.txt 占位账号（{...} 分块格式；号码为
-        #    secrets.md 约定的占位号段，非真实账号）
+        # 3) data/passwords/chaoxing.txt 占位账号（{...} 分块格式）与
+        #    deepseek.txt 占位密钥（均为 secrets.md 约定的占位样式，非真实值）
         shell: pwsh
         run: |
           Copy-Item chaoxing_config.example.json chaoxing_config.json
@@ -59,8 +61,13 @@ jobs:
           password[2]: ci-placeholder
           }
           "@
+          $deepseek = @"
+          DEEPSEEK_API_KEY="sk-example-ci-placeholder"
+          model="deepseek-v4-flash-vision-exp"
+          "@
           New-Item -ItemType Directory -Force -Path ..\data\passwords | Out-Null
           Set-Content -Path ..\data\passwords\chaoxing.txt -Value $placeholder -Encoding utf8
+          Set-Content -Path ..\data\passwords\deepseek.txt -Value $deepseek -Encoding utf8
 
       - name: Run unit tests
         # 仅单测：integration / e2e 需要真实浏览器与凭据，不在 CI 范围
