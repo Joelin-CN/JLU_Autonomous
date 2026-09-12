@@ -501,3 +501,46 @@ chaoxing_cli.bat full-auto --all-accounts --headed
   当前生效账号文件（`CHAOXING_ACCOUNTS_FILE` 可覆盖路径），显式编号防止档案错位。
 - **任务运行中**锁定所有写操作（AI 配置、账号、账号路径），由主进程 `jobState`
   统一把关。
+
+---
+
+## 双平台并行任务执行（2026-09-12）
+
+从「全局单任务」升级为「**每平台一个执行槽位**：同平台互斥、跨平台并行」。
+
+### 编排层（Electron 主进程）
+
+- **槽位表** `electron/ipc/jobSlots.ts`：`Map<Platform, { jobId, bridge, grantedBudgetGB }>`，
+  纯逻辑（不 import electron，可单测）。`job:start` 的互斥从全局 `activeJobId` 改为
+  按平台判占用；pause/resume/stop/resolve-ticket 一律按 `jobId` 路由到对应槽位的
+  bridge；进程 done/exit 通过 `releaseIfCurrent(bridge)` 释放槽位（身份守卫防旧进程
+  迟到事件误清新任务槽位）。应用退出时 `stopAllJobs()` 遍历全部槽位走
+  STOP → SIGTERM → SIGKILL 升级链。
+- **内存动态剩余分账** `electron/memory/planner.ts#allocateBudget`：spawn 时本任务份额 =
+  `clamp(全局预算 − 其他平台已授予之和, 最低保障 1 账号, 全局预算)`，`--max-concurrent`
+  按份额重算，`--system-limit-gb` 恒为全机值。允许「授予额」受控超卖——两平台 Python
+  进程的 `gate_open` 实测的都是全局 Chrome 占用（profile 同根），实际内存天然收敛；
+  两进程共用同一 fail-closed 急停线，**红线：总占用不超单机预算**。
+- **事件 platform 盖章**：8 类 NDJSON 事件转发到渲染层时统一注入 `platform`
+  （协议本身不变）；`job:resolve-ticket` 载荷新增可选 `jobId` 做进程路由（不透传 Python）。
+- **互斥语义分层**：`jobState.isJobActive(platform?)` 派生自槽位表——账号增删改按
+  **平台**锁（超星任务运行时仍可维护智慧树账号文件）；设置/AI 配置等共享配置在
+  **任意平台**任务运行时锁定。
+
+### Python 平台层（core/orchestrator 不动）
+
+- `platforms/zhihuishu/api.py` 补齐 4 个内存 argparse 参数并挂 `core.memory` 的
+  `MemoryMonitor`/`gate_open`/`measure_project_chrome_gb` 模块钩子
+  （`core.orchestrator.ModuleRunner` 惰性读取）——修复此前「UI 启动智慧树任务因
+  未识别参数直接退出」的存量 bug，并使智慧树获得与超星同构的预算闸门/监视器。
+
+### 渲染层
+
+- `execution.store` 槽位化：`Record<Platform, Slot>` 各持 jobId/status/lanes/phases/
+  计时（lane 计时分槽持有，跨平台同号账号天然不撞）；事件监听一次注册、按
+  `event.jobId` 路由到槽；任务完成后的课程回读显式带任务自己的平台（修课程桶错读）。
+- 执行页按平台分组双 banner（各自 暂停/继续/停止/关闭 与统计）；侧栏平台切换在
+  任务运行中**允许**（切换只是 UI 上下文，数据按平台分桶）；课程总览启动按钮按
+  「同平台运行中」禁用；`memory.store` 事件/计划按平台分桶。
+- mock 层 `simulations Map`：同平台再启动=替换旧仿真（模拟互斥），跨平台并存，
+  事件带 `jobId`/`platform`——dev mock 模式可完整演示双平台并行。

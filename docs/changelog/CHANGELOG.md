@@ -2,6 +2,15 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12（续五）— 双平台并行任务执行（后端编排 + 渲染层多任务）
+
+- **同平台互斥、跨平台并行**：Electron 主进程从全局单任务（`activeJobId` + 单 `bridge`）重构为 **per-platform 槽位表**（`ipc/jobSlots.ts` 纯逻辑模块，vitest 可测）：`job:start` 按平台判占用（另一平台任务不阻塞）；pause/resume/stop/resolve-ticket 按 `jobId` 路由到对应槽位 bridge；进程 done/exit 经 `releaseIfCurrent` 身份守卫释放槽位（防旧进程迟到事件误清）；应用退出 `stopAllJobs()` 遍历全部槽位。IPC 通道名与 NDJSON 8 事件协议不变。
+- **内存动态剩余分账（策略 B）**：`memory/planner.ts#allocateBudget`——独跑拿全额预算（现状不变）；后启任务份额 = `clamp(全局预算 − 其他平台已授予, 最低保障 1 账号, 全局预算)`，`--max-concurrent` 按份额重算；授予额允许受控超卖，但两平台 Python 闸门实测全局 Chrome 占用（profile 同根）天然收敛，`--system-limit-gb` 恒全机值两进程共用 fail-closed 急停线——**总占用不超单机预算红线可守**。
+- **智慧树内存治理补齐（修存量崩溃 bug）**：此前 `job.handler` 对所有平台无条件传 `--max-concurrent/--budget-gb/...`，而智慧树 argparse 未定义 → UI 启动智慧树任务直接 SystemExit(2)。现 `platforms/zhihuishu/api.py` 补 4 个内存参数并挂 `core.memory` 的 gate/monitor 钩子（`core.orchestrator` 一行不动，平台层 ~25 行接线），智慧树获得与超星同构的预算闸门。
+- **事件 platform 盖章 + 工单路由**：8 类事件主进程转发时统一注入 `platform`（additive）；`job:resolve-ticket` 载荷新增可选 `jobId`（双任务时路由到对应平台进程，缺省回落唯一活跃任务，不透传 Python）；`closeBrowserSessions` 调用点补传 `job.platform`（修「停智慧树任务误关超星会话」存量 bug）；`jobState.isJobActive(platform?)` 派生自槽位表——账号增删改按平台锁，设置/AI 配置全局锁。
+- **渲染层多任务化**：`execution.store` 槽位化（`Record<Platform, Slot>` 各持 jobId/lanes/phases/计时，事件按 `event.jobId` 路由；任务完成课程回读带任务自己的平台，修课程桶错读）；执行页按平台分组双 banner（各自控制按钮/统计）；侧栏运行中**允许**切换平台（数据分桶使切换安全）；课程总览启动按钮改「同平台运行中」禁用；`memory.store` 按平台分桶；ipcClient 单 `currentHandle` → 按 jobId Map（platform 回填不再串）；mock 层单仿真 → `simulations Map`（同平台替换/跨平台并存，事件带 jobId+platform）。
+- **验证**：后端 `pytest tests/unit` **618 passed**；前端 typecheck 0 错误 + vitest **50 passed**（新增 jobSlots 槽位 6 例 / allocateBudget 分账 5 例 / mockClient 双任务生命周期 4 例 / execution.store 双槽路由 4 例）；dev mock 双确认：双 banner 分组渲染、组内暂停/继续独立生效（暂停智慧树组不影响超星组）、运行中切平台、超星验证码 + 智慧树扫码工单分别弹出、完成回读日志带平台标签——视口截图经 vision 分析无布局缺陷。文档：api.md v1.6 / architecture.md 并行执行章节 / 验证清单。
+
 ## 2026-09-12（续四）— 前端多平台 UI 重构：品牌通用化 + 平台一级维度 + 工单三形态
 
 - **品牌通用化**：全部「超星助手 / Chaoxing Assistant」文案与标识改为「**JLU 学习助手**」（App 壳/侧栏/窗口标题/系统通知/index.html/`productName`/`appId→cn.edu.jlu.assistant`/`package.json name`）；`APP_NAME` 改 `jlu-study-assistant`（打包 userData 一次性 rename 迁移，开发模式不受影响）；localStorage key 迁移 `chaoxing-assistant-settings → jlu-study-assistant-settings`（读旧写新删旧）；接口名 `ChaoxingApi → AppApi`；图标暂沿用（无设计资源）。
