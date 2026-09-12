@@ -30,9 +30,14 @@ extraResources:
   - from: ../backend
     to: backend
     filter:
+      # M1 平台抽象布局：core/（平台无关层）+ platforms/（chaoxing/zhihuishu
+      # 实现）+ chaoxing/（兼容垫片，保留 python -m chaoxing.* 旧入口）。
+      - core/**/*.py
+      - platforms/chaoxing/**/*.py
+      - platforms/chaoxing/**/*.js
+      - platforms/chaoxing/**/*.json
+      - platforms/zhihuishu/**/*.py
       - chaoxing/**/*.py
-      - chaoxing/**/*.js
-      - chaoxing/**/*.json
       - scripts/_table.json
       - scripts/_decrypt_font.js
       - scripts/_v17_section_player.js

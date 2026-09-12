@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import path from 'path'
 import { spawn, ChildProcess } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from '../ipc/status.handler'
@@ -78,14 +79,14 @@ export class PythonBridge extends EventEmitter {
   // Real process
   // ================================================================
 
-  start(args: string[], jobId?: string): void {
+  start(args: string[], jobId?: string, platform: 'chaoxing' | 'zhihuishu' = 'chaoxing'): void {
     this.buffer = ''
     this.bufferTruncated = false
     if (jobId) this.jobId = jobId
     // Canonical backend entry is the JSON-line protocol module
-    // `python -m chaoxing.api` (NOT the legacy scripts/ shim, which does not
-    // speak the protocol). It must run with cwd = backend root so the
-    // `chaoxing` package is importable.
+    // `python -m platforms.<platform>.api` (M1 平台抽象布局；chaoxing 兼容
+    // 垫片保留 `python -m chaoxing.api` 旧入口). It must run with cwd =
+    // backend root so the packages are importable.
     //
     // Whitelist: only forward necessary env vars to the Python subprocess.
     // Using ...process.env would leak sensitive variables like ARK_API_KEY,
@@ -96,6 +97,7 @@ export class PythonBridge extends EventEmitter {
       'PYTHONPATH', 'PYTHONHOME',
       'CHAOXING_WORKSPACE', 'CHAOXING_DATA_DIR', 'CHAOXING_HEADED',
       'CHAOXING_ACCOUNTS_FILE',
+      'ZHIHUISHU_ACCOUNTS_FILE', 'ZHIHUISHU_HEADED',
     ]
     const safeEnv: Record<string, string> = { PYTHONUNBUFFERED: '1' }
     for (const key of ALLOWED_ENV) {
@@ -113,8 +115,16 @@ export class PythonBridge extends EventEmitter {
     // Honor the user's headless setting. The backend reads CHAOXING_HEADED ("1"
     // launches a visible browser); headless:true (the default) leaves it "0".
     const settings = getCurrentSettings()
-    safeEnv.CHAOXING_HEADED = settings.headless ? '0' : '1'
-    if (settings.accountsFilePath) {
+    const headed = settings.headless ? '0' : '1'
+    safeEnv.CHAOXING_HEADED = headed
+    safeEnv.ZHIHUISHU_HEADED = headed
+    // Accounts file: the per-platform override wins (zhihuishu.txt); otherwise
+    // fall back to the shared chaoxing.txt path setting for the chaoxing lane.
+    if (platform === 'zhihuishu') {
+      safeEnv.ZHIHUISHU_ACCOUNTS_FILE =
+        process.env.ZHIHUISHU_ACCOUNTS_FILE
+        ?? path.join(DATA_DIR, 'passwords', 'zhihuishu.txt')
+    } else if (settings.accountsFilePath) {
       safeEnv.CHAOXING_ACCOUNTS_FILE = settings.accountsFilePath
     }
     safeEnv.CHAOXING_TIMEOUT_PAGE_LOAD = String(settings.pageLoadTimeout)
@@ -126,7 +136,7 @@ export class PythonBridge extends EventEmitter {
     safeEnv.CHAOXING_RETRY_QUIZ_MAX = String(settings.quizRetryCount)
     safeEnv.CHAOXING_RETRY_TARGET_SCORE = String(settings.targetAccuracy)
 
-    const fullArgs = ['-m', 'chaoxing.api', ...args]
+    const fullArgs = ['-m', `platforms.${platform}.api`, ...args]
 
     // Honor the configured interpreter via the shared resolver (empty = 'python'
     // from PATH). Strict mode: a configured-but-missing path is kept so the

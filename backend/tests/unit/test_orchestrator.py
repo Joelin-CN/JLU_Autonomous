@@ -115,7 +115,8 @@ class TestRunMultiAccount:
         run_multi_account([0], "scan_only")
         # Verify a thread was spawned with a RunConfig that has scan_only=True
         args = mock_thread.call_args[1]["args"]
-        config = args[2]
+        # core.orchestrator 线程参数布局: (runner, idx, creds, config, ...)
+        config = args[3]
         assert isinstance(config, RunConfig)
         assert config.scan_only is True
         SHUTDOWN_FLAG.clear()

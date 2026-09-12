@@ -29,19 +29,21 @@ const here = path.dirname(fileURLToPath(import.meta.url))
  */
 
 /**
- * Locate the directory containing `chaoxing/api.py`.
+ * Locate the directory containing the Python backend packages
+ * (`core/` + `platforms/` + the `chaoxing/` compat shim).
  *
  * Resolution order:
  *   1. `CHAOXING_BACKEND_DIR` env override (non-standard layouts).
  *   2. When packaged: `process.resourcesPath/backend` (shipped via
  *      electron-builder `extraResources`).
  *   3. Dev: walk up from the compiled main process location looking for a
- *      `backend/chaoxing/api.py` marker — robust to dev vs. build layout.
+ *      `backend/platforms/chaoxing/api.py` marker — robust to dev vs. build
+ *      layout. (M1 平台抽象重构后 chaoxing 实现位于 platforms/ 下。)
  *   4. Fallback to the standard layout relative to dist-electron/.
  */
 function resolveCodeDir(): string {
   const override = process.env.CHAOXING_BACKEND_DIR
-  if (override && fs.existsSync(path.join(override, 'chaoxing', 'api.py'))) {
+  if (override && fs.existsSync(path.join(override, 'platforms', 'chaoxing', 'api.py'))) {
     return path.resolve(override)
   }
 
@@ -52,7 +54,7 @@ function resolveCodeDir(): string {
   let dir = here
   for (let i = 0; i < 6; i++) {
     const candidate = path.join(dir, 'backend')
-    if (fs.existsSync(path.join(candidate, 'chaoxing', 'api.py'))) {
+    if (fs.existsSync(path.join(candidate, 'platforms', 'chaoxing', 'api.py'))) {
       return candidate
     }
     const parent = path.dirname(dir)
@@ -63,7 +65,7 @@ function resolveCodeDir(): string {
   return path.resolve(here, '../../backend')
 }
 
-/** Read-only directory holding the `chaoxing` package (spawn cwd). */
+/** Read-only directory holding the Python backend (spawn cwd). */
 export const CODE_DIR = resolveCodeDir()
 
 /**

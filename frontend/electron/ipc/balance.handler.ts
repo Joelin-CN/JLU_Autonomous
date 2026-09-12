@@ -64,8 +64,8 @@ function runBalanceQuery(provider: 'doubao' | 'deepseek' = 'doubao'): Promise<Ba
     let child
     try {
       const args = provider === 'deepseek'
-        ? ['-m', 'chaoxing.balance', '--provider', 'deepseek-api']
-        : ['-m', 'chaoxing.balance']
+        ? ['-m', 'platforms.chaoxing.balance', '--provider', 'deepseek-api']
+        : ['-m', 'platforms.chaoxing.balance']
       child = spawn(pythonPath, args, {
         cwd: CODE_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
