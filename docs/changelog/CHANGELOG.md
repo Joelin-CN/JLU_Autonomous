@@ -2,6 +2,14 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12（续）— M2 智慧树平台包 + 前端 IPC 平台化
+
+- **M2 后端**（`platforms/zhihuishu/`）：XOR 编码器（实测向量）、auth（扫码优先 + 密码/滑块兜底 + 会话管理）、scanner（课程列表 + 章节树 DOM 解析）、api（JSON-line 协议入口）、accounts/courses 子命令、`core/credentials.py` 通用凭据解析。**有头 Chrome 实测全链路 95s**：扫码→登录检测→课程扫描→章节树→JSON 落盘。
+- **引擎修复（core）**：`--headed` 全局前缀致 headed 模式点击全灭（继承自超星的隐性 bug）；UTF-8 流包装 GC 关闭底层 buffer 致 pytest 静默崩溃（改 `reconfigure`）；新增 `core/browser/orphans.py` 通用孤儿清理。
+- **前端 IPC 平台化**：`Platform` 类型 + `StartJobPayload.platform` 贯通 5 处 spawn 位（`platforms.<platform>.api/accounts/courses`）、`ZHIHUISHU_ACCOUNTS_FILE/HEADED` 环境注入、会话清理 `{platform}-chrome-*`、backendPath marker 与打包白名单适配 M1 布局。渲染层平台切换 UI 留待后续 PR（默认平台行为不变）。
+- **实测发现（写入报告附录 D）**：智慧树登录 Cookie 会话级不落盘；章节树 el-scrollbar 懒加载；playwright-cli `--headed` 仅 open 子命令可用；主页存在登录链接干扰判定。
+- **验证**：后端 629 passed / 前端 typecheck 全绿；验证清单 `VALIDATION_AFTER_ZHIHUISHU_M1M2_2026-09-12.md`。
+
 ## 2026-09-12 — 智慧树 M0 调研完成 + M1 平台抽象重构（core/ + platforms/）
 
 - **M0 双轨调研完成**：`docs/reports/analysis/ZHIHUISHU_REFS_2026-09-12.md`（11 个 GitHub 项目 + 4 个 GreasyFork 脚本参考矩阵，标杆 = Autovisor/fuckZHS/Cooanyh）与 `ZHIHUISHU_ANALYSIS_2026-09-12.md`（Q1–Q8 全部落答 + 选择器「DOM+视觉」交叉确认清单）。关键实证：密码登录必触发易盾滑块且自动化环境被指纹检测拒绝（4 次实测）、扫码登录可行、学习页 URL 密文 = `hex(XOR("recruitId;courseId","zhihuishu"))` 已破译验证、**异常学习行为会锁课**（实测触发，已固化为工程红线）、2020 年油猴选择器词汇 2026 仍有效。技术路线决策 D2：浏览器自动化为主。
