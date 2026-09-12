@@ -12,7 +12,7 @@ describe('migrateLegacySettings（旧品牌持久化结构迁移）', () => {
       chaoxing: 'D:/custom/chaoxing.txt',
       zhihuishu: '',
     })
-    expect((migrated as Record<string, unknown>).accountsFilePath).toBeUndefined()
+    expect('accountsFilePath' in migrated).toBe(false)
   })
 
   it('keeps the new shape untouched when only new-style data exists', () => {
