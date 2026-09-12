@@ -2,6 +2,19 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12（续三）— M3 视频全链路实测通过（0.1 节 456/456s，全程无人值守）
+
+- **实测结论（全部 DOM+视觉双确认）**：storageState 零扫码二次验证；章节树滚动加载 38 节点；**三种弹窗自动化**（学前必读=右上角X带重试、课程提醒=下次再说每轮清扫、弹题=试选→.answer 揭示→选正确→进度入账）；播放启动=真实点击 .videoArea（.bigPlayButton 需 hover 且悬停态跨 CLI 命令不保持，实测换路径）；**0.1 节 456/456s 原速完整播放**（.time_icofinish 标记），途中自动处理 2 弹题 + 2 课程提醒。
+- **关键修复**：fixed 定位弹窗可见性判定（offsetParent 恒 null 致三类弹窗漏检，统一 rect+computedStyle）；播放/恢复点击改 .videoArea；观看循环每轮通用弹窗清扫。
+- 回归 632 passed。
+
+## 2026-09-12（续二）— M3 前置：storageState 登录态 / core 编排机上收 / 视频处理器（D6 原速策略）
+
+- **storageState 登录态闭环（D5 对策）**：登录成功导出 `chrome-profiles/zhihuishu/account-N/storage-state.json`，任务启动注入 Cookie——实测第二轮**零扫码**（75 cookies 恢复→直接登录，34s 完成扫描 vs 首轮扫码 105s）。
+- **core/orchestrator.py 上收**：多账号并发/内存门/泳道结果机制平台无关化（ModuleRunner 惰性 getattr，平台模块 monkeypatch 语义保留）；chaoxing 委托 core（测试全绿），zhihuishu api 接入（多账号并发生效）。
+- **M3 视频处理器（platforms/zhihuishu/video.py，D6 决策）**：仅 1.0 倍速真实播放——不碰倍速菜单、播放/静音/下一节全走站点控件真实点击、观察 JS 只读（paused/currentTime）、4–7s 人味轮询、禁心跳伪造；含章节树滚动加载、锁课检测（跳过+申诉工单）、弹题「试选→.answer 揭示→改选」纯 DOM 处理。实测待可用课程。
+- **回归**：629+3 passed（含 storageState 过滤与 D6 节奏单测）。
+
 ## 2026-09-12（续）— M2 智慧树平台包 + 前端 IPC 平台化
 
 - **M2 后端**（`platforms/zhihuishu/`）：XOR 编码器（实测向量）、auth（扫码优先 + 密码/滑块兜底 + 会话管理）、scanner（课程列表 + 章节树 DOM 解析）、api（JSON-line 协议入口）、accounts/courses 子命令、`core/credentials.py` 通用凭据解析。**有头 Chrome 实测全链路 95s**：扫码→登录检测→课程扫描→章节树→JSON 落盘。
