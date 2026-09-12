@@ -29,7 +29,7 @@ export const useAccountStore = defineStore('account', () => {
 
   /* actions */
 
-  async function fetchAccounts(): Promise<void> {
+  async function fetchAccounts(platform?: 'chaoxing' | 'zhihuishu'): Promise<void> {
     if (loading.value && pendingFetch) return pendingFetch
     if (loaded.value) return
 
@@ -37,7 +37,7 @@ export const useAccountStore = defineStore('account', () => {
     error.value = null
     pendingFetch = (async () => {
       try {
-        accounts.value = await api.getAccounts()
+        accounts.value = await api.getAccounts(platform)
         loaded.value = true
       } catch (e: any) {
         // Surface the reason (e.g. a stale pythonPath) in the log console —

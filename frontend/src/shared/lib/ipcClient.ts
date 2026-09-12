@@ -117,6 +117,7 @@ export class ElectronApiClient implements ChaoxingApi {
     this.dispose()
     const api = requireAPI()
     const result = await api.startJob({
+      platform: payload.platform,
       accountIds: payload.accounts.map((id) => Number.parseInt(id, 10)),
       courseIds: payload.courses,
       mode: mapMode(payload.mode),
@@ -227,8 +228,8 @@ export class ElectronApiClient implements ChaoxingApi {
     return handle
   }
 
-  async scanCourses(accountIds?: string[]): Promise<Course[]> {
-    const raw = await requireAPI().scanCourses({ accountIds: (accountIds ?? []).map((id) => Number.parseInt(id, 10)) })
+  async scanCourses(accountIds?: string[], platform?: 'chaoxing' | 'zhihuishu'): Promise<Course[]> {
+    const raw = await requireAPI().scanCourses({ accountIds: (accountIds ?? []).map((id) => Number.parseInt(id, 10)), platform })
     return (raw as any[]).map(mapElectronCourse)
   }
 
@@ -237,8 +238,8 @@ export class ElectronApiClient implements ChaoxingApi {
     return (raw as any[]).map(mapElectronCourse)
   }
 
-  async getAccounts(): Promise<Account[]> {
-    const raw = await requireAPI().getAccounts()
+  async getAccounts(platform?: 'chaoxing' | 'zhihuishu'): Promise<Account[]> {
+    const raw = await requireAPI().getAccounts(platform)
     return raw.map((account: any) => ({
       id: String(account.id),
       username: account.username,
@@ -337,8 +338,8 @@ export class ElectronApiClient implements ChaoxingApi {
     return requireAPI().openFilePicker()
   }
 
-  async getAccountsDefaultPath(): Promise<string> {
-    return requireAPI().getAccountsDefaultPath()
+  async getAccountsDefaultPath(platform?: 'chaoxing' | 'zhihuishu'): Promise<string> {
+    return requireAPI().getAccountsDefaultPath(platform)
   }
 
   async getTickets(): Promise<Ticket[]> {

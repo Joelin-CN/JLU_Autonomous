@@ -53,6 +53,17 @@
       <div v-if="extraAccountCount > 0" class="extra-hint">更多账号... (+{{ extraAccountCount }})</div>
 
       <div class="left-actions">
+      <div class="platform-switch" role="tablist" aria-label="平台切换">
+        <button
+          v-for="opt in platformOptions"
+          :key="opt.value"
+          class="platform-switch__btn"
+          :class="{ 'platform-switch__btn--active': platform === opt.value }"
+          :disabled="executionStore.isRunning"
+          @click="switchPlatform(opt.value)"
+        >{{ opt.label }}</button>
+      </div>
+
         <button class="btn btn--outline btn--block" :disabled="noAccountSelected || executionStore.isRunning" @click="scanClicked">
           {{ executionStore.isRunning ? '运行中...' : '一键扫描' }}
         </button>
@@ -165,6 +176,20 @@ const accountStore = useAccountStore()
 const campaignStore = useCampaignStore()
 const courseStore = useCourseStore()
 const executionStore = useExecutionStore()
+
+/** 当前平台（影响账号文件/课程数据/任务后端入口）。 */
+const platform = ref<'chaoxing' | 'zhihuishu'>('chaoxing')
+const platformOptions = [
+  { value: 'chaoxing' as const, label: '超星学习通' },
+  { value: 'zhihuishu' as const, label: '智慧树' },
+]
+async function switchPlatform(next: 'chaoxing' | 'zhihuishu'): Promise<void> {
+  if (platform.value === next || executionStore.isRunning) return
+  platform.value = next
+  accountStore.deselectAll()
+  courseStore.deselectAllCourses()
+  await accountStore.fetchAccounts(next)
+}
 const settingsStore = useSettingsStore()
 const memoryStore = useMemoryStore()
 
@@ -303,6 +328,7 @@ async function startJob(
   accountOverride?: string[],
 ): Promise<void> {
   const payload: StartJobPayload = {
+    platform: platform.value,
     objective: 'catchup',
     strategy: 'balanced',
     mode,
@@ -668,5 +694,32 @@ onMounted(async () => {
   .course-grid {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style scoped>
+.platform-switch {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--color-border, #d0d5dd);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-right: 12px;
+}
+.platform-switch__btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text-secondary, #667085);
+}
+.platform-switch__btn--active {
+  background: var(--color-primary, #2563eb);
+  color: #fff;
+}
+.platform-switch__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

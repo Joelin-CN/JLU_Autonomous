@@ -9,6 +9,9 @@ export type AIProvider = 'doubao'
 
 export type AccountStatus = 'online' | 'offline' | 'error' | 'checking'
 
+/** 课程平台标识。 */
+export type Platform = 'chaoxing' | 'zhihuishu'
+
 export interface Account {
   id: string
   username: string
@@ -131,6 +134,7 @@ export interface AiTestResult {
 }
 
 export interface StartJobPayload {
+  platform?: Platform
   objective: ObjectiveType
   strategy: StrategyType
   mode: ModeType
@@ -277,9 +281,9 @@ export interface ChaoxingApi {
   resumeSelected(jobId: string, accountIds: string[]): Promise<void>
   stopSelected(jobId: string, accountIds: string[]): Promise<void>
   getJobStatus(jobId: string): Promise<JobHandle>
-  scanCourses(accountIds?: string[]): Promise<Course[]>
+  scanCourses(accountIds?: string[], platform?: Platform): Promise<Course[]>
   getCourses(accountId?: string): Promise<Course[]>
-  getAccounts(): Promise<Account[]>
+  getAccounts(platform?: Platform): Promise<Account[]>
   getAccountStatus(accountId: string): Promise<Account>
   getSettings(): Promise<Settings>
   setSettings(settings: Settings): Promise<void>

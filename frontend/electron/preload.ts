@@ -35,7 +35,7 @@ export interface ElectronAPI {
   getJobStatus: (jobId: string) => Promise<JobStatus>
   scanCourses: (payload: ScanCoursesPayload) => Promise<Course[]>
   getCourses: (accountId: number) => Promise<Course[]>
-  getAccounts: () => Promise<Account[]>
+  getAccounts: (platform?: 'chaoxing' | 'zhihuishu') => Promise<Account[]>
   getAccountStatus: (accountId: number) => Promise<AccountStatus>
   getSettings: () => Promise<Settings>
   setSettings: (partial: Partial<Settings>) => Promise<void>
@@ -52,7 +52,7 @@ export interface ElectronAPI {
   editAccount: (payload: { index: number; password?: string; website?: string }) => Promise<void>
   removeAccount: (payload: { index: number }) => Promise<void>
   openFilePicker: () => Promise<string | null>
-  getAccountsDefaultPath: () => Promise<string>
+  getAccountsDefaultPath: (platform?: 'chaoxing' | 'zhihuishu') => Promise<string>
   onProgress: (cb: (event: PythonProgressEvent) => void) => () => void
   onPhaseChange: (cb: (event: PythonPhaseEvent) => void) => () => void
   onLog: (cb: (event: PythonLogEvent) => void) => () => void
@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getJobStatus: (jobId: string) => ipcRenderer.invoke(IPC_CHANNELS.JOB_STATUS, jobId),
   scanCourses: (payload: ScanCoursesPayload) => ipcRenderer.invoke(IPC_CHANNELS.COURSES_SCAN, payload),
   getCourses: (accountId: number) => ipcRenderer.invoke(IPC_CHANNELS.COURSES_LIST, accountId),
-  getAccounts: () => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_LIST),
+  getAccounts: (platform?: string) => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_LIST, platform ? { platform } : undefined),
   getAccountStatus: (accountId: number) => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_STATUS, accountId),
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
   setSettings: (partial: Partial<Settings>) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET, partial),
@@ -111,7 +111,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAccount: (payload: { index: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_REMOVE, payload),
   openFilePicker: () => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_FILE),
-  getAccountsDefaultPath: () => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH),
+  getAccountsDefaultPath: (platform?: string) => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH, platform ? { platform } : undefined),
   onProgress: makeListener<PythonProgressEvent>(IPC_CHANNELS.ON_PROGRESS),
   onPhaseChange: makeListener<PythonPhaseEvent>(IPC_CHANNELS.ON_PHASE_CHANGE),
   onLog: makeListener<PythonLogEvent>(IPC_CHANNELS.ON_LOG),

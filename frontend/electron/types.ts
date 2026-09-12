@@ -146,6 +146,7 @@ export interface ResolveTicketPayload {
 export interface ScanCoursesPayload {
   accountIds: number[]
   courseIds?: string[]
+  platform?: Platform
 }
 
 export interface Settings {
