@@ -1,13 +1,14 @@
 import type {
   Account,
   AccountLane,
+  AppApi,
   Balance,
-  ChaoxingApi,
   CompletionEvent,
   Course,
   ErrorEvent,
   JobHandle,
   PhaseChangeEvent,
+  Platform,
   ProgressEvent,
   RuntimePhase,
   Settings,
@@ -38,6 +39,26 @@ const MOCK_CAPTCHA_IMAGE =
     '</svg>',
   )
 
+// Placeholder QR-looking block (inline SVG) for the zhihuishu QR-login demo
+// ticket in mock/browser mode.
+const MOCK_QR_IMAGE = (() => {
+  let cells = ''
+  for (let y = 0; y < 12; y++) {
+    for (let x = 0; x < 12; x++) {
+      if ((x * 7 + y * 13 + ((x * y) % 5)) % 3 === 0) {
+        cells += `<rect x="${x * 20 + 4}" y="${y * 20 + 4}" width="14" height="14" fill="#111"/>`
+      }
+    }
+  }
+  return (
+    'data:image/svg+xml;utf8,' +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240">` +
+        `<rect width="240" height="240" fill="#fff"/>${cells}</svg>`,
+    )
+  )
+})()
+
 
 interface JobSimulation {
   jobId: string
@@ -49,18 +70,25 @@ interface JobSimulation {
 
 const MAX_TICKETS = 200
 
-export class MockApiClient implements ChaoxingApi {
-  private accounts: Account[] = []
+const PLATFORMS: Platform[] = ['chaoxing', 'zhihuishu']
+
+export class MockApiClient implements AppApi {
+  /** 按平台分桶的 mock 状态（与真实 store 的分桶模型一致）。 */
+  private accountsByPlatform: Record<Platform, Account[]> = { chaoxing: [], zhihuishu: [] }
   private coursesByAccount: Record<string, Course[]> = {}
   private tickets: Ticket[] = []
   private currentSimulation: JobSimulation | null = null
   private listeners = new Map<string, Set<EventCallback>>()
 
   constructor() {
-    this.accounts = generateMockAccounts()
-    this.tickets = generateMockTickets()
-    for (const account of this.accounts.slice(0, 5)) {
-      this.coursesByAccount[account.id] = generateMockCoursesForAccount(account.id)
+    for (const platform of PLATFORMS) {
+      // zhihuishu gets fewer seeded accounts — mirrors a mid-migration setup.
+      const count = platform === 'chaoxing' ? 8 : 3
+      this.accountsByPlatform[platform] = generateMockAccounts(count, platform)
+      for (const account of this.accountsByPlatform[platform].slice(0, platform === 'chaoxing' ? 5 : 3)) {
+        this.coursesByAccount[`${platform}:${account.id}`] = generateMockCoursesForAccount(account.id, undefined, platform)
+      }
+      this.tickets.push(...generateMockTickets(undefined, platform))
     }
   }
 
@@ -185,24 +213,43 @@ export class MockApiClient implements ChaoxingApi {
 
     this.simulateJob(this.currentSimulation)
 
-    // Demo: surface a captcha ticket a few seconds in so the CaptchaModal can
-    // be exercised in browser/mock mode without a real backend.
+    // Demo: surface a platform-appropriate interactive ticket a few seconds in
+    // so the CaptchaModal can be exercised in browser/mock mode without a real
+    // backend — chaoxing shows the captcha-input form, zhihuishu the QR-scan
+    // form (with its own countdown).
+    const jobPlatform: Platform = payload.platform ?? 'chaoxing'
     const captchaTimer = setTimeout(() => {
       if (!this.currentSimulation?.running) return
       const accountId = payload.accounts?.[0] ?? '0'
-      const captcha: Ticket = {
-        id: `captcha_${accountId}_${Math.floor(Date.now() / 1000)}`,
-        title: '需要人工输入验证码',
-        message: `账号 ${accountId} 在反爬验证码处受阻，AI 识别失败，请人工输入`,
-        severity: 'critical',
-        accountId: String(accountId),
-        kind: 'captcha',
-        imageBase64: MOCK_CAPTCHA_IMAGE,
-        options: ['输入验证码', '跳过此课程'],
-        resolved: false,
-        createdAt: Date.now(),
-      }
-      this.addTicket(captcha)
+      const stamp = Math.floor(Date.now() / 1000)
+      const demo: Ticket = jobPlatform === 'zhihuishu'
+        ? {
+            id: `zhihuishu-qr-login-${accountId}-${stamp}`,
+            title: '智慧树扫码登录',
+            message: `账号 ${accountId}：请使用智慧树 App 扫描二维码登录（storageState 未命中）`,
+            severity: 'critical',
+            accountId: String(accountId),
+            platform: jobPlatform,
+            kind: 'qrcode',
+            imageBase64: MOCK_QR_IMAGE,
+            timeoutSeconds: 180,
+            resolved: false,
+            createdAt: Date.now(),
+          }
+        : {
+            id: `captcha_${accountId}_${stamp}`,
+            title: '需要人工输入验证码',
+            message: `账号 ${accountId} 在反爬验证码处受阻，AI 识别失败，请人工输入`,
+            severity: 'critical',
+            accountId: String(accountId),
+            platform: jobPlatform,
+            kind: 'captcha',
+            imageBase64: MOCK_CAPTCHA_IMAGE,
+            options: ['输入验证码', '跳过此课程'],
+            resolved: false,
+            createdAt: Date.now(),
+          }
+      this.addTicket(demo)
     }, 4000)
     this.currentSimulation.timers.push(captchaTimer)
 
@@ -309,36 +356,45 @@ export class MockApiClient implements ChaoxingApi {
     return this.cloneHandle(this.getSimulation(jobId).handle)
   }
 
-  async scanCourses(accountIds?: string[]): Promise<Course[]> {
+  async scanCourses(accountIds?: string[], platform?: Platform): Promise<Course[]> {
     await sleep(500)
-    const targetIds = accountIds?.length ? accountIds : this.accounts.slice(0, 5).map((account) => account.id)
+    const scoped: Platform = platform ?? 'chaoxing'
+    const accounts = this.accountsByPlatform[scoped]
+    const targetIds = accountIds?.length
+      ? accountIds
+      : accounts.slice(0, 5).map((account) => account.id)
     const results: Course[] = []
 
     for (const accountId of targetIds) {
-      const courses = generateMockCoursesForAccount(accountId)
-      this.coursesByAccount[accountId] = courses
+      const courses = generateMockCoursesForAccount(accountId, undefined, scoped)
+      this.coursesByAccount[`${scoped}:${accountId}`] = courses
       results.push(...courses)
     }
 
-    this.addLog('info', `Scanned ${results.length} courses.`)
+    this.addLog('info', `Scanned ${results.length} courses (${scoped}).`)
     return results
   }
 
-  async getCourses(accountId?: string): Promise<Course[]> {
+  async getCourses(accountId?: string, platform?: Platform): Promise<Course[]> {
     await sleep(150)
+    const scoped: Platform = platform ?? 'chaoxing'
     if (accountId) {
-      if (!this.coursesByAccount[accountId]) {
-        this.coursesByAccount[accountId] = generateMockCoursesForAccount(accountId)
+      const key = `${scoped}:${accountId}`
+      if (!this.coursesByAccount[key]) {
+        this.coursesByAccount[key] = generateMockCoursesForAccount(accountId, undefined, scoped)
       }
-      return [...this.coursesByAccount[accountId]]
+      return [...this.coursesByAccount[key]]
     }
 
-    return Object.values(this.coursesByAccount).flatMap((courses) => courses)
+    return Object.entries(this.coursesByAccount)
+      .filter(([key]) => key.startsWith(`${scoped}:`))
+      .flatMap(([, courses]) => courses)
   }
 
-  async getAccounts(): Promise<Account[]> {
+  async getAccounts(platform?: Platform): Promise<Account[]> {
     await sleep(150)
-    return this.accounts.map((account) => ({
+    const scoped: Platform = platform ?? 'chaoxing'
+    return this.accountsByPlatform[scoped].map((account) => ({
       ...account,
       lastChecked: Date.now(),
       status: account.status === 'checking' ? 'online' : account.status,
@@ -347,7 +403,8 @@ export class MockApiClient implements ChaoxingApi {
 
   async getAccountStatus(accountId: string): Promise<Account> {
     await sleep(100)
-    const account = this.accounts.find((item) => item.id === accountId)
+    const account = [...this.accountsByPlatform.chaoxing, ...this.accountsByPlatform.zhihuishu]
+      .find((item) => item.id === accountId)
     if (!account) {
       throw new Error(`Account ${accountId} not found`)
     }
@@ -356,12 +413,12 @@ export class MockApiClient implements ChaoxingApi {
 
   async getSettings(): Promise<Settings> {
     await sleep(100)
-    const stored = localStorage.getItem('chaoxing-assistant-settings')
+    const stored = localStorage.getItem('jlu-study-assistant-settings')
     if (stored) {
       try {
         return JSON.parse(stored)
       } catch {
-        localStorage.removeItem('chaoxing-assistant-settings')
+        localStorage.removeItem('jlu-study-assistant-settings')
       }
     }
 
@@ -376,7 +433,7 @@ export class MockApiClient implements ChaoxingApi {
       debugMode: false,
       headless: true,
       targetAccuracy: 100,
-      accountsFilePath: '',
+      accountsFilePaths: { chaoxing: '', zhihuishu: '' },
       concurrencyTarget: null,
       perAccountEstimateGB: 0.7,
       pythonPath: '',
@@ -392,7 +449,7 @@ export class MockApiClient implements ChaoxingApi {
 
   async setSettings(settings: Settings): Promise<void> {
     await sleep(100)
-    localStorage.setItem('chaoxing-assistant-settings', JSON.stringify(settings))
+    localStorage.setItem('jlu-study-assistant-settings', JSON.stringify(settings))
   }
 
   async getAiStatus(): Promise<{ provider: string; label: string; configured: boolean; model: string; keyTail: string }> {
@@ -409,16 +466,28 @@ export class MockApiClient implements ChaoxingApi {
     return { ok: true, models: 3 }
   }
 
-  async addAccount(_payload: { account: string; password: string; website?: string }): Promise<void> {
+  async addAccount(payload: { account: string; password: string; website?: string; platform?: Platform }): Promise<void> {
+    await sleep(150)
+    // Mock mutation so the settings view reflects add/edit/remove instantly.
+    const platform: Platform = payload.platform ?? 'chaoxing'
+    this.accountsByPlatform[platform].push({
+      id: `acct_${Date.now()}_${this.accountsByPlatform[platform].length}`,
+      username: payload.account,
+      displayName: payload.account,
+      website: payload.website,
+      platform,
+      status: 'online',
+    })
+  }
+
+  async editAccount(_payload: { index: number; password?: string; website?: string; platform?: Platform }): Promise<void> {
     await sleep(150)
   }
 
-  async editAccount(_payload: { index: number; password?: string; website?: string }): Promise<void> {
+  async removeAccount(index: number, platform?: Platform): Promise<void> {
     await sleep(150)
-  }
-
-  async removeAccount(_index: number): Promise<void> {
-    await sleep(150)
+    const scoped: Platform = platform ?? 'chaoxing'
+    this.accountsByPlatform[scoped].splice(index, 1)
   }
 
   async openFilePicker(): Promise<string | null> {
@@ -426,9 +495,9 @@ export class MockApiClient implements ChaoxingApi {
     return null
   }
 
-  async getAccountsDefaultPath(): Promise<string> {
+  async getAccountsDefaultPath(platform?: Platform): Promise<string> {
     await sleep(20)
-    return 'data/passwords/chaoxing.txt'
+    return `data/passwords/${platform ?? 'chaoxing'}.txt`
   }
 
   async getMemoryPlan(): Promise<import('./types').MemoryPlan> {
@@ -442,7 +511,8 @@ export class MockApiClient implements ChaoxingApi {
   async getTickets(): Promise<Ticket[]> {
     await sleep(150)
     if (Math.random() > 0.7) {
-      this.addTicket(generateMockTickets(1)[0])
+      const platform = PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)]
+      this.addTicket(generateMockTickets(1, platform)[0])
     }
     return [...this.tickets]
   }

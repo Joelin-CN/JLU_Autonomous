@@ -9,7 +9,9 @@
 | 平台 | 状态 | 说明 |
 |------|------|------|
 | 超星学习通 | ✅ 已支持 | 现有全部功能：课程扫描、章节处理、AI 测验答题、多账号并发 |
-| 智慧树 (zhihuishu.com) | 🚧 规划中 | 目标：同级别自动化能力；路线图与调研骨架见 [docs/roadmap/zhihuishu.md](docs/roadmap/zhihuishu.md) |
+| 智慧树 (zhihuishu.com) | 🚧 建设中 | 登录（扫码优先）/ 课程与章节扫描 ✅、视频任务（1.0 倍速真实播放）✅、答题求解（M4）⏳；路线图见 [docs/roadmap/zhihuishu.md](docs/roadmap/zhihuishu.md) |
+
+> 桌面端品牌为「**JLU 学习助手**」：侧栏顶部的平台切换器（超星 / 智慧树）是全局一级维度，账号、课程、任务与工单均按当前平台分桶展示；任务按钮按各平台能力矩阵显隐（如智慧树的「仅刷题」在 M4 落地前置灰）。
 
 ## 项目结构
 
@@ -106,10 +108,11 @@ npm run typecheck
 | 文件 | 内容 |
 |------|------|
 | `chaoxing.txt` | 超星账号密码 |
+| `zhihuishu.txt` | 智慧树账号密码（登录也可走任务期扫码，见平台说明） |
 | `doubao.txt` | `ARK_API_KEY="..."`（豆包 Ark 推理密钥，用于 AI 答题） |
 | `volc_billing.txt` | `VOLC_ACCESS_KEY="..."` 与 `VOLC_SECRET_KEY="..."`（火山引擎 AK/SK，仅余额查询需要） |
 
-> 打包后配置与只读资产播种到可写工作区（`%APPDATA%/超星助手/workspace/`），凭据/浏览器档案/日志等运行时数据落在 `%APPDATA%/超星助手/data/`，首启自动建目录，不会覆盖你已存在的文件。
+> 打包后配置与只读资产播种到可写工作区（`%APPDATA%/jlu-study-assistant/workspace/`），凭据/浏览器档案/日志等运行时数据落在 `%APPDATA%/jlu-study-assistant/data/`，首启自动建目录，不会覆盖你已存在的文件（旧「超星助手」版本的 userData 会在首次启动时一次性迁移）。
 
 ## 打包与分发
 

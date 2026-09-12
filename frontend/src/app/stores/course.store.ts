@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
-import type { Course } from '@/shared/lib/types'
+import { computed, ref, watch } from 'vue'
+import type { Course, Platform } from '@/shared/lib/types'
 import { createApiClient } from '@/shared/lib/apiClient'
+import { usePlatformStore } from '@/app/stores/platform.store'
 
 const api = createApiClient()
 
@@ -17,7 +18,14 @@ function removeFromSet(setRef: { value: Set<string> }, id: string): void {
   setRef.value = next
 }
 
+/**
+ * 课程 store —— 缓存按 `platform:accountId` 复合键分桶：账号 id 是各平台
+ * 凭据文件里的 0 基行号，两个平台的「账号 0」若共用一个键会互相覆盖。
+ * 对外 API 仍以 accountId 表达；内部自动限定在当前平台的桶内。
+ */
 export const useCourseStore = defineStore('course', () => {
+  const platformStore = usePlatformStore()
+
   const coursesByAccount = ref<Record<string, Course[]>>({})
   const activeAccountId = ref<string | null>(null)
   const selectedCourseIds = ref<Set<string>>(new Set())
@@ -30,15 +38,31 @@ export const useCourseStore = defineStore('course', () => {
   const pendingFetches = new Map<string, Promise<void>>()
   const pendingScans = new Map<string, Promise<void>>()
 
+  /** Bucket key: platform-scoped so per-platform file line numbers never collide. */
+  function bucketKey(accountId: string): string {
+    return `${platformStore.currentPlatform}:${accountId}`
+  }
+
   const loading = computed(() => loadingAccountIds.value.size > 0)
   const scanning = computed(() => scanningAccountIds.value.size > 0)
 
-  const allCourses = computed(() => Object.values(coursesByAccount.value).flatMap((courses) => courses))
+  /** 当前平台所有已加载账号的课程（扁平）。 */
+  const allCourses = computed(() => {
+    const prefix = `${platformStore.currentPlatform}:`
+    return Object.entries(coursesByAccount.value)
+      .filter(([key]) => key.startsWith(prefix))
+      .flatMap(([, courses]) => courses)
+  })
 
   const activeCourses = computed(() => {
     if (!activeAccountId.value) return []
-    return coursesByAccount.value[activeAccountId.value] ?? []
+    return coursesByAccount.value[bucketKey(activeAccountId.value)] ?? []
   })
+
+  /** 当前平台某账号的课程（视图按账号计数用；内部限定当前平台桶）。 */
+  function coursesForAccount(accountId: string): Course[] {
+    return coursesByAccount.value[bucketKey(accountId)] ?? []
+  }
 
   const selectedCourses = computed(() =>
     allCourses.value.filter((course) => selectedCourseIds.value.has(course.id)),
@@ -46,80 +70,101 @@ export const useCourseStore = defineStore('course', () => {
 
   const hasSelection = computed(() => selectedCourseIds.value.size > 0)
 
+  // Course ids are platform-scoped too; drop selection + active account when
+  // the platform context changes so stale cross-platform ids never leak into
+  // a startJob payload.
+  watch(() => platformStore.currentPlatform, () => {
+    selectedCourseIds.value = new Set()
+    activeAccountId.value = null
+  })
+
   function getTargetAccountId(accountId?: string): string {
     return accountId ?? activeAccountId.value ?? 'default'
   }
 
-  function setCoursesForAccount(accountId: string, courses: Course[]): void {
+  function setCoursesForAccount(accountId: string, courses: Course[], platform = platformStore.currentPlatform): void {
+    const key = `${platform}:${accountId}`
+    const tagged = courses.map((c) => ({ ...c, platform: c.platform ?? platform }))
     coursesByAccount.value = {
       ...coursesByAccount.value,
-      [accountId]: courses,
+      [key]: tagged,
     }
-    addToSet(loadedAccountIds, accountId)
+    addToSet(loadedAccountIds, key)
     // Non-empty course data is positive evidence the account has been scanned.
-    if (courses.length > 0) {
-      addToSet(scannedAccountIds, accountId)
+    if (tagged.length > 0) {
+      addToSet(scannedAccountIds, key)
     }
   }
 
-  async function fetchCourses(accountId?: string): Promise<void> {
+  async function fetchCourses(accountId?: string, platform?: Platform): Promise<void> {
     const targetId = getTargetAccountId(accountId)
-    if (pendingFetches.has(targetId)) {
-      return pendingFetches.get(targetId)!
+    const scopedPlatform = platform ?? platformStore.currentPlatform
+    const key = `${scopedPlatform}:${targetId}`
+    if (pendingFetches.has(key)) {
+      return pendingFetches.get(key)!
     }
-    if (loadedAccountIds.value.has(targetId) && coursesByAccount.value[targetId]) {
+    if (loadedAccountIds.value.has(key) && coursesByAccount.value[key]) {
       return
     }
 
     error.value = null
-    addToSet(loadingAccountIds, targetId)
+    addToSet(loadingAccountIds, key)
 
     const request = (async () => {
       try {
-        const courses = await api.getCourses(targetId)
-        setCoursesForAccount(targetId, courses)
+        const courses = await api.getCourses(targetId, scopedPlatform)
+        setCoursesForAccount(targetId, courses, scopedPlatform)
       } catch (e: any) {
         error.value = e?.message ?? 'Failed to fetch courses'
       } finally {
-        removeFromSet(loadingAccountIds, targetId)
-        pendingFetches.delete(targetId)
+        removeFromSet(loadingAccountIds, key)
+        pendingFetches.delete(key)
       }
     })()
 
-    pendingFetches.set(targetId, request)
+    pendingFetches.set(key, request)
     return request
   }
 
   async function scanCourses(accountId?: string): Promise<void> {
     const targetId = getTargetAccountId(accountId)
-    if (pendingScans.has(targetId)) {
-      return pendingScans.get(targetId)!
+    const key = bucketKey(targetId)
+    if (pendingScans.has(key)) {
+      return pendingScans.get(key)!
     }
 
     error.value = null
-    addToSet(scanningAccountIds, targetId)
+    addToSet(scanningAccountIds, key)
 
     const request = (async () => {
       try {
-        const courses = await api.scanCourses(targetId ? [targetId] : undefined)
+        const courses = await api.scanCourses(
+          targetId && targetId !== 'default' ? [targetId] : undefined,
+          platformStore.currentPlatform,
+        )
         setCoursesForAccount(targetId, courses)
         // scanCourses re-reads the persisted discovery state — a successful
         // read (even when empty) means the account has been scanned already.
-        addToSet(scannedAccountIds, targetId)
+        addToSet(scannedAccountIds, key)
       } catch (e: any) {
         error.value = e?.message ?? 'Failed to scan courses'
       } finally {
-        removeFromSet(scanningAccountIds, targetId)
-        pendingScans.delete(targetId)
+        removeFromSet(scanningAccountIds, key)
+        pendingScans.delete(key)
       }
     })()
 
-    pendingScans.set(targetId, request)
+    pendingScans.set(key, request)
     return request
   }
 
   function setActiveAccount(accountId: string): void {
     activeAccountId.value = accountId
+  }
+
+  /** 平台切换时由 platformStore.switchPlatform 调用。 */
+  function resetActiveAccount(): void {
+    activeAccountId.value = null
   }
 
   function toggleCourseSelection(courseId: string): void {
@@ -158,14 +203,15 @@ export const useCourseStore = defineStore('course', () => {
   }
 
   function hasLoadedAccount(accountId: string): boolean {
-    return loadedAccountIds.value.has(accountId)
+    return loadedAccountIds.value.has(bucketKey(accountId))
   }
 
   /** 账号是否已经扫描过：本会话内成功读取过发现文件，或已存在课程数据。 */
   function isAccountScanned(accountId: string): boolean {
+    const key = bucketKey(accountId)
     return (
-      scannedAccountIds.value.has(accountId) ||
-      (coursesByAccount.value[accountId]?.length ?? 0) > 0
+      scannedAccountIds.value.has(key) ||
+      (coursesByAccount.value[key]?.length ?? 0) > 0
     )
   }
 
@@ -173,8 +219,6 @@ export const useCourseStore = defineStore('course', () => {
     coursesByAccount,
     activeAccountId,
     selectedCourseIds,
-    loadedAccountIds,
-    scannedAccountIds,
     loadingAccountIds,
     scanningAccountIds,
     loading,
@@ -182,11 +226,13 @@ export const useCourseStore = defineStore('course', () => {
     error,
     allCourses,
     activeCourses,
+    coursesForAccount,
     selectedCourses,
     hasSelection,
     fetchCourses,
     scanCourses,
     setActiveAccount,
+    resetActiveAccount,
     toggleCourseSelection,
     selectAllCourses,
     deselectAllCourses,

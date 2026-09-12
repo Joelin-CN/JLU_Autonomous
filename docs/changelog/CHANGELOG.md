@@ -2,6 +2,15 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12（续四）— 前端多平台 UI 重构：品牌通用化 + 平台一级维度 + 工单三形态
+
+- **品牌通用化**：全部「超星助手 / Chaoxing Assistant」文案与标识改为「**JLU 学习助手**」（App 壳/侧栏/窗口标题/系统通知/index.html/`productName`/`appId→cn.edu.jlu.assistant`/`package.json name`）；`APP_NAME` 改 `jlu-study-assistant`（打包 userData 一次性 rename 迁移，开发模式不受影响）；localStorage key 迁移 `chaoxing-assistant-settings → jlu-study-assistant-settings`（读旧写新删旧）；接口名 `ChaoxingApi → AppApi`；图标暂沿用（无设计资源）。
+- **平台一级维度（修 PR #3 三层断点）**：新增 `platform.store`（全局 `currentPlatform`，localStorage 持久化）+ 侧栏品牌区下方全局切换器（运行中禁切）+ 头部当前平台徽标 + 侧栏 footer 双平台状态行；撤销课程图谱页 view-local Tab。**账号/课程数据按平台分桶**（`Record<Platform, Account[]>` 与 `platform:accountId` 复合键，两平台行号不再互撞）；electron 主进程 `accounts:list` / `courses:scan` / `courses:list` / `accounts:add|edit|remove` 修复为消费已声明的 platform 参数（此前硬编码 chaoxing，切换器「看起来支持、数据仍是超星」）——不改任何 IPC 通道名。
+- **能力矩阵驱动**：新增 `shared/lib/platforms.ts`（`PLATFORM_META` 徽标元数据 + `PLATFORM_CAPABILITIES`）；课程图谱任务按钮组按矩阵显隐/置灰——智慧树「全自动（视频）」文案、仅刷题/仅内容置灰并带「M4 开发中」tooltip；设置页账号表单「登录网址」字段仅超星显示；`passport2.chaoxing.com` 硬编码特判改平台注册表 `defaultLoginHost`。
+- **工单三形态**：渲染层 `Ticket` 增 `timeoutSeconds` / `platform` / 判别 `kind`（`captcha` 输入型 / `qrcode` 扫码型 / `hint` 提示型），`mapElectronTicket` 透传新字段并按后端字段组合判别形态（扫码=图+timeoutSeconds；滑块=无图 captcha）；CaptchaModal 三形态（扫码型二维码大图+per-ticket 倒计时+扫码后自动继续，提示型文字+URL linkify）；主进程转发 `on-ticket` 时注入任务平台；关注队列加工单平台 tag + 平台过滤 pill + 申诉链接可点击。
+- **视图与 mock**：仪表盘统计卡/账号点阵按平台分组（AI 余额卡保留全局）；执行页 banner 平台徽标；设置页账号面板平台 Tab（可分别管理两平台账号，路径 per-platform）；`maskPhone` 四份本地拷贝统一为 `shared/lib/mask.ts maskLogin`（学号等非手机号登录通用掩码）；mock 层按平台生成数据（超星手机号+mooc1 / 智慧树学号+onlineweb）并覆盖三形态工单，`__popCaptcha(kind)` DEV 钩子支持注入三形态。
+- **验证（视觉+DOM 双确认）**：dev 模式 10 项交互流全部通过（切平台→账号列表换学号→按钮降级→扫码/滑块/输入工单弹出→平台持久化→旧 key 迁移删除），4 张截图经 vision 分析无阻塞缺陷；`npm run typecheck` 双 project 绿；vitest **31 passed**（新增 platforms 注册表/classifyTicketKind/settings 迁移/captcha 超时/mock 平台路由 5 组）；后端 `pytest tests/unit` 不回归。存量观察项（点阵图例色差、统计卡密度、工单平台 tag 图标）记录于 PR。
+
 ## 2026-09-12（续三）— M3 视频全链路实测通过（0.1 节 456/456s，全程无人值守）
 
 - **实测结论（全部 DOM+视觉双确认）**：storageState 零扫码二次验证；章节树滚动加载 38 节点；**三种弹窗自动化**（学前必读=右上角X带重试、课程提醒=下次再说每轮清扫、弹题=试选→.answer 揭示→选正确→进度入账）；播放启动=真实点击 .videoArea（.bigPlayButton 需 hover 且悬停态跨 CLI 命令不保持，实测换路径）；**0.1 节 456/456s 原速完整播放**（.time_icofinish 标记），途中自动处理 2 弹题 + 2 课程提醒。

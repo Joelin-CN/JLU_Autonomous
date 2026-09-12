@@ -4,7 +4,19 @@
       <AppSidebar />
       <main class="main">
         <header class="header">
-          <span class="header__title">超星助手</span>
+          <span class="header__title">JLU 学习助手</span>
+          <span
+            class="header__platform-chip"
+            :style="{
+              color: platformStore.meta.color,
+              borderColor: platformStore.meta.color,
+              background: `${platformStore.meta.color}1a`,
+            }"
+            :title="`当前平台：${platformStore.meta.label}`"
+          >
+            <span class="header__platform-icon">{{ platformStore.meta.icon }}</span>
+            {{ platformStore.meta.label }}
+          </span>
           <span class="header__subtitle">智能学习辅助</span>
           <button
             v-if="logStore.collapsed"
@@ -36,15 +48,18 @@ import { useSettingsStore } from '@/app/stores/settings.store'
 import { useLogStore } from '@/app/stores/log.store'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useAttentionStore } from '@/app/stores/attention.store'
+import { usePlatformStore } from '@/app/stores/platform.store'
 
 const settingsStore = useSettingsStore()
 const logStore = useLogStore()
 const accountStore = useAccountStore()
 const attentionStore = useAttentionStore()
+const platformStore = usePlatformStore()
 
 onMounted(() => {
-  // Bootstrap initial data fetching (fire-and-forget)
-  accountStore.fetchAccounts()
+  // Bootstrap initial data fetching (fire-and-forget). Account bootstrap uses
+  // the persisted global platform; the other bucket loads on first switch.
+  accountStore.fetchAccounts(platformStore.currentPlatform)
   attentionStore.fetchTickets()
 })
 </script>
@@ -96,6 +111,23 @@ html, body, #app {
   font-size: 20px;
   font-weight: 700;
   color: var(--text);
+}
+
+.header__platform-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.header__platform-icon {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .header__subtitle {
