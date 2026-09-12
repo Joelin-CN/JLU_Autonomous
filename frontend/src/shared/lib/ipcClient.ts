@@ -90,6 +90,7 @@ function mapElectronTicket(ticket: any): Ticket {
 
   return {
     id: ticket.id,
+    jobId: ticket.jobId,
     title: ticket.title,
     message: ticket.message,
     severity,
@@ -132,10 +133,12 @@ function mapElectronCourse(raw: any): Course {
 
 export class ElectronApiClient implements AppApi {
   private cleanupFns: Array<() => void> = []
-  private currentHandle: JobHandle | null = null
+  /** 每个 jobId 一份本地快照（mode/objective 等渲染层专属字段回填用）。
+   *  双平台并行时两个任务各自持份，互不串扰。 */
+  private handles = new Map<string, JobHandle>()
 
   async startJob(payload: StartJobPayload): Promise<JobHandle> {
-    this.dispose()
+    // 双平台并行：不清既有监听（多任务事件按 jobId 路由），只记新 handle。
     const api = requireAPI()
     const platform: Platform = payload.platform ?? 'chaoxing'
     const result = await api.startJob({
@@ -156,7 +159,7 @@ export class ElectronApiClient implements AppApi {
       message,
     }))
 
-    this.currentHandle = {
+    this.handles.set(result.jobId, {
       jobId: result.jobId,
       status: 'running',
       platform,
@@ -177,8 +180,8 @@ export class ElectronApiClient implements AppApi {
         currentTask: index === 0 ? 'Starting...' : 'Queued...',
         currentPhase: phases[0]?.name,
       })),
-    }
-    return this.currentHandle
+    })
+    return this.handles.get(result.jobId)!
   }
 
   async pauseJob(jobId: string, accountIds?: string[]): Promise<void> {
@@ -209,11 +212,12 @@ export class ElectronApiClient implements AppApi {
 
   async getJobStatus(jobId: string): Promise<JobHandle> {
     const raw = await requireAPI().getJobStatus(jobId) as any
-    const mode = this.currentHandle?.mode ?? mapBackMode(raw.mode)
+    const known = this.handles.get(jobId)
+    const mode = known?.mode ?? mapBackMode(raw.mode)
     const modeConfig = MODES.find((item) => item.key === mode)
-    const phaseIndex = typeof raw.phaseIndex === 'number' ? raw.phaseIndex : this.currentHandle?.phaseIndex ?? 0
+    const phaseIndex = typeof raw.phaseIndex === 'number' ? raw.phaseIndex : known?.phaseIndex ?? 0
     // Always recompute the stepper from phaseIndex + global progress. The
-    // old "prefer currentHandle.phases" shortcut replayed the snapshot taken
+    // old "prefer known.phases" shortcut replayed the snapshot taken
     // at startJob() forever, overwriting live event-driven updates.
     const phases = (modeConfig?.phases ?? []).map(([name, message], index) => ({
       name,
@@ -225,16 +229,19 @@ export class ElectronApiClient implements AppApi {
     const handle: JobHandle = {
       jobId: raw.jobId,
       status: raw.status,
-      // Backend JobStatus carries no platform; keep the one recorded at start.
-      platform: this.currentHandle?.platform,
-      createdAt: this.currentHandle?.createdAt ?? Date.now(),
-      startedAt: raw.startedAt ? new Date(raw.startedAt).getTime() : this.currentHandle?.startedAt,
-      completedAt: raw.finishedAt ? new Date(raw.finishedAt).getTime() : this.currentHandle?.completedAt,
-      objective: this.currentHandle?.objective ?? 'catchup',
-      strategy: this.currentHandle?.strategy ?? 'balanced',
+      // Backend JobStatus carries platform (recorded at job:start); fall back
+      // to the one recorded locally for pre-upgrade jobs.
+      platform: raw.platform === 'zhihuishu' || raw.platform === 'chaoxing'
+        ? raw.platform
+        : known?.platform,
+      createdAt: known?.createdAt ?? Date.now(),
+      startedAt: raw.startedAt ? new Date(raw.startedAt).getTime() : known?.startedAt,
+      completedAt: raw.finishedAt ? new Date(raw.finishedAt).getTime() : known?.completedAt,
+      objective: known?.objective ?? 'catchup',
+      strategy: known?.strategy ?? 'balanced',
       mode,
-      courseCount: raw.courseIds?.length ?? this.currentHandle?.courseCount ?? 0,
-      accountCount: raw.accountIds?.length ?? this.currentHandle?.accountCount ?? 0,
+      courseCount: raw.courseIds?.length ?? known?.courseCount ?? 0,
+      accountCount: raw.accountIds?.length ?? known?.accountCount ?? 0,
       progress: raw.progress,
       phaseIndex,
       phases,
@@ -249,7 +256,7 @@ export class ElectronApiClient implements AppApi {
       memoryPlan: raw.memoryPlan,
     }
 
-    this.currentHandle = handle
+    this.handles.set(jobId, handle)
     return handle
   }
 
@@ -381,6 +388,7 @@ export class ElectronApiClient implements AppApi {
   }
 
   async resolveCaptcha(payload: {
+    jobId?: string
     ticketId: string
     accountId: number
     answer?: string
@@ -431,8 +439,9 @@ export class ElectronApiClient implements AppApi {
     const cleanup = requireAPI().onProgress((event: any) => {
       cb({
         jobId: event.jobId,
+        platform: event.platform,
         phase: event.phase ?? '',
-        phaseIndex: event.phaseIndex ?? this.currentHandle?.phaseIndex ?? 0,
+        phaseIndex: event.phaseIndex ?? 0,
         percent: event.percent,
         message: event.message,
         timestamp: Date.now(),
@@ -446,9 +455,10 @@ export class ElectronApiClient implements AppApi {
     const cleanup = requireAPI().onPhaseChange((event: any) => {
       cb({
         jobId: event.jobId,
+        platform: event.platform,
         fromPhase: event.fromPhase ?? '',
         toPhase: event.phase,
-        phaseIndex: event.phaseIndex ?? this.currentHandle?.phaseIndex ?? 0,
+        phaseIndex: event.phaseIndex ?? 0,
         timestamp: Date.now(),
       })
     })
@@ -456,9 +466,11 @@ export class ElectronApiClient implements AppApi {
     return cleanup
   }
 
-  onLog(cb: (line: { level: string; message: string; timestamp: number }) => void): () => void {
+  onLog(cb: (line: { jobId: string; platform?: Platform; level: string; message: string; timestamp: number }) => void): () => void {
     const cleanup = requireAPI().onLog((event: any) => {
       cb({
+        jobId: event.jobId,
+        platform: event.platform,
         level: event.level,
         message: event.message,
         timestamp: new Date(event.timestamp).getTime(),
@@ -501,6 +513,7 @@ export class ElectronApiClient implements AppApi {
     const cleanup = requireAPI().onError((event: any) => {
       cb({
         jobId: event.jobId,
+        platform: event.platform,
         error: event.error,
         phase: event.phase ?? '',
         recoverable: Boolean(event.recoverable),

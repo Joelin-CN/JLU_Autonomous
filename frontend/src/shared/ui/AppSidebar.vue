@@ -18,17 +18,15 @@
         class="platform-tab"
         :class="{
           'platform-tab--active': platformStore.currentPlatform === p,
-          'platform-tab--disabled': switchDisabled,
-        }"
+      }"
         :style="platformStore.currentPlatform === p ? { borderColor: metaFor(p).color, color: metaFor(p).color } : undefined"
-        :title="switchDisabled ? '任务运行中，暂不能切换平台' : `切换到${metaFor(p).label}`"
-        :disabled="switchDisabled"
+        :title="`切换到${metaFor(p).label}`"
         @click="onSwitch(p)"
       >
         <span class="platform-tab__icon">{{ metaFor(p).icon }}</span>
         <span class="platform-tab__label">{{ metaFor(p).shortLabel }}</span>
         <span
-          v-if="executionStore.isRunning && executionStore.platform === p"
+          v-if="executionStore.isRunningOn(p)"
           class="platform-tab__running"
           title="该平台有任务运行中"
         />
@@ -67,7 +65,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import StatusDot from './StatusDot.vue'
 import type { Platform } from '@/shared/lib/types'
@@ -103,24 +100,21 @@ function metaFor(platform: Platform) {
   return platformStore.metaFor(platform)
 }
 
-/** 运行中禁切（与既有 CourseAtlasView 切换守卫一致的语义）。 */
-const switchDisabled = computed(() => executionStore.isRunning)
-
 async function onSwitch(next: Platform): Promise<void> {
-  // Rejected while a job is running (switchPlatform guards); views react to
-  // the platform store change automatically — data is bucketed per platform.
+  // 任务按平台独立槽位运行（双平台并行），切换只是 UI 上下文切换——
+  // 运行中允许切换；视图随 platform store 变化自动按桶取数。
   await platformStore.switchPlatform(next)
 }
 
 function sessionStatusFor(platform: Platform): 'online' | 'running' | 'idle' | 'error' {
-  if (executionStore.isRunning && executionStore.platform === platform) return 'running'
+  if (executionStore.isRunningOn(platform)) return 'running'
   const list = accountStore.accountsFor(platform)
   if (!list.length) return 'idle'
   return list.some((a) => a.status === 'error') ? 'error' : 'online'
 }
 
 function sessionLabelFor(platform: Platform): string {
-  if (executionStore.isRunning && executionStore.platform === platform) return '任务运行中'
+  if (executionStore.isRunningOn(platform)) return '任务运行中'
   const list = accountStore.accountsFor(platform)
   if (!list.length) return '未配置账号'
   return `${list.length} 个账号`

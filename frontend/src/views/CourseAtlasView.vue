@@ -58,12 +58,12 @@
       <div v-if="extraAccountCount > 0" class="extra-hint">更多账号... (+{{ extraAccountCount }})</div>
 
       <div class="left-actions">
-        <button class="btn btn--outline btn--block" :disabled="noAccountSelected || executionStore.isRunning" @click="scanClicked">
-          {{ executionStore.isRunning ? '运行中...' : '一键扫描' }}
+        <button class="btn btn--outline btn--block" :disabled="noAccountSelected || platformJobRunning" @click="scanClicked">
+          {{ platformJobRunning ? '运行中...' : '一键扫描' }}
         </button>
         <button
           class="btn btn--primary btn--block"
-          :disabled="noAccountSelected || executionStore.isRunning"
+          :disabled="noAccountSelected || platformJobRunning"
           :title="fullAutoHint"
           @click="startFullAuto"
         >
@@ -138,23 +138,23 @@
             <button
               v-if="unscannedSelectedAccounts.length > 0"
               class="btn btn--outline"
-              :disabled="executionStore.isRunning"
+              :disabled="platformJobRunning"
               :title="`为 ${unscannedSelectedAccounts.length} 个尚未扫描的账号扫描课程`"
               @click="scanUnscannedOnly"
             >仅扫描</button>
-            <button class="btn btn--primary" :disabled="executionStore.isRunning" @click="startJob('full-auto')">
+            <button class="btn btn--primary" :disabled="platformJobRunning" @click="startJob('full-auto')">
               按队列启动 {{ accountStore.selectedAccountIds.size }} 个账号 · 最多 {{ planMax }} 并发
             </button>
             <!-- 任务模式按平台能力矩阵显隐/置灰（shared/lib/platforms.ts） -->
             <button
               class="btn btn--outline"
-              :disabled="executionStore.isRunning || !caps.tasks.solveOnly"
+              :disabled="platformJobRunning || !caps.tasks.solveOnly"
               :title="caps.tasks.solveOnlyHint"
               @click="startJob('batch-exec', { focus: 'quiz' })"
             >仅刷题</button>
             <button
               class="btn btn--outline"
-              :disabled="executionStore.isRunning || !caps.tasks.contentOnly"
+              :disabled="platformJobRunning || !caps.tasks.contentOnly"
               :title="caps.tasks.contentOnlyHint"
               @click="startJob('batch-exec', { focus: 'content' })"
             >仅内容</button>
@@ -192,6 +192,9 @@ const executionStore = useExecutionStore()
 /** 全局平台上下文（侧栏切换器驱动；本页不再持有局部平台状态）。 */
 const platformStore = usePlatformStore()
 const caps = computed(() => platformStore.capabilities)
+
+/** 同平台互斥（另一平台的任务不阻塞本平台启动 —— 双平台并行）。 */
+const platformJobRunning = computed(() => executionStore.isRunningOn(platformStore.currentPlatform))
 
 const settingsStore = useSettingsStore()
 const memoryStore = useMemoryStore()
@@ -255,10 +258,11 @@ const activeCourses = computed(() => {
 })
 
 /** True while the displayed account has an executing lane — course-card
- *  progress bars are snapshots until that run finishes and reloads. */
+ *  progress bars are snapshots until that run finishes and reloads.
+ *  归属平台 = 当前 UI 平台（任务在各自平台的槽位里运行）。 */
 const activeAccountLaneRunning = computed(() => {
   if (!activeAccountId.value) return false
-  return executionStore.lanes.some(
+  return executionStore.slotOf(platformStore.currentPlatform).lanes.some(
     (lane) => lane.accountId === activeAccountId.value && lane.status === 'running',
   )
 })

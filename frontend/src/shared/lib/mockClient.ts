@@ -62,6 +62,7 @@ const MOCK_QR_IMAGE = (() => {
 
 interface JobSimulation {
   jobId: string
+  platform: Platform
   payload: StartJobPayload
   handle: JobHandle
   timers: ReturnType<typeof setTimeout>[]
@@ -77,7 +78,8 @@ export class MockApiClient implements AppApi {
   private accountsByPlatform: Record<Platform, Account[]> = { chaoxing: [], zhihuishu: [] }
   private coursesByAccount: Record<string, Course[]> = {}
   private tickets: Ticket[] = []
-  private currentSimulation: JobSimulation | null = null
+  /** 按 jobId 键控的并行仿真：同平台互斥（再启动即替换），跨平台并存。 */
+  private simulations = new Map<string, JobSimulation>()
   private listeners = new Map<string, Set<EventCallback>>()
 
   constructor() {
@@ -107,8 +109,8 @@ export class MockApiClient implements AppApi {
     }
   }
 
-  private addLog(level: string, message: string): void {
-    this.emit('log', { level, message, timestamp: Date.now() })
+  private addLog(level: string, message: string, jobId?: string, platform?: Platform): void {
+    this.emit('log', { jobId: jobId ?? '', platform, level, message, timestamp: Date.now() })
   }
 
   private clearTimers(simulation: JobSimulation): void {
@@ -118,10 +120,21 @@ export class MockApiClient implements AppApi {
     simulation.timers = []
   }
 
-  private stopSimulation(): void {
-    if (!this.currentSimulation) return
-    this.currentSimulation.running = false
-    this.clearTimers(this.currentSimulation)
+  private stopSimulation(simulation: JobSimulation): void {
+    simulation.running = false
+    this.clearTimers(simulation)
+    this.simulations.delete(simulation.jobId)
+  }
+
+  /** 同平台互斥：停掉该平台既有仿真（模拟后端 per-platform 槽位语义）。 */
+  private stopSimulationForPlatform(platform: Platform): void {
+    for (const simulation of this.simulations.values()) {
+      if (simulation.platform === platform) {
+        simulation.running = false
+        this.clearTimers(simulation)
+        this.simulations.delete(simulation.jobId)
+      }
+    }
   }
 
   private cloneHandle(handle: JobHandle): JobHandle {
@@ -133,10 +146,11 @@ export class MockApiClient implements AppApi {
   }
 
   private getSimulation(jobId: string): JobSimulation {
-    if (!this.currentSimulation || this.currentSimulation.jobId !== jobId) {
+    const simulation = this.simulations.get(jobId)
+    if (!simulation) {
       throw new Error(`Job ${jobId} not found`)
     }
-    return this.currentSimulation
+    return simulation
   }
 
   private getMaxConcurrency(payload: StartJobPayload): number {
@@ -181,9 +195,10 @@ export class MockApiClient implements AppApi {
     }
   }
 
-  private emitStoppedCompletion(jobId: string, startedAt: number): void {
+  private emitStoppedCompletion(simulation: JobSimulation): void {
     this.emit('completed', {
-      jobId,
+      jobId: simulation.handle.jobId,
+      platform: simulation.platform,
       success: false,
       results: {
         totalSections: 0,
@@ -192,7 +207,7 @@ export class MockApiClient implements AppApi {
         totalQuizzes: 0,
         solvedQuizzes: 0,
         failedQuizzes: 0,
-        durationMs: Date.now() - startedAt,
+        durationMs: Date.now() - simulation.handle.createdAt,
       },
       timestamp: Date.now(),
     } satisfies CompletionEvent)
@@ -200,31 +215,35 @@ export class MockApiClient implements AppApi {
 
   async startJob(payload: StartJobPayload): Promise<JobHandle> {
     await sleep(300)
-    this.stopSimulation()
+    const jobPlatform: Platform = payload.platform ?? 'chaoxing'
+    // 同平台互斥：替换该平台的旧仿真；另一平台的仿真不受影响（双平台并行）。
+    this.stopSimulationForPlatform(jobPlatform)
 
     const handle = generateMockJobHandle(payload)
-    this.currentSimulation = {
+    const simulation: JobSimulation = {
       jobId: handle.jobId,
+      platform: jobPlatform,
       payload,
       handle,
       timers: [],
       running: true,
     }
+    this.simulations.set(handle.jobId, simulation)
 
-    this.simulateJob(this.currentSimulation)
+    this.simulateJob(simulation)
 
     // Demo: surface a platform-appropriate interactive ticket a few seconds in
     // so the CaptchaModal can be exercised in browser/mock mode without a real
     // backend — chaoxing shows the captcha-input form, zhihuishu the QR-scan
     // form (with its own countdown).
-    const jobPlatform: Platform = payload.platform ?? 'chaoxing'
     const captchaTimer = setTimeout(() => {
-      if (!this.currentSimulation?.running) return
+      if (!simulation.running) return
       const accountId = payload.accounts?.[0] ?? '0'
       const stamp = Math.floor(Date.now() / 1000)
       const demo: Ticket = jobPlatform === 'zhihuishu'
         ? {
             id: `zhihuishu-qr-login-${accountId}-${stamp}`,
+            jobId: handle.jobId,
             title: '智慧树扫码登录',
             message: `账号 ${accountId}：请使用智慧树 App 扫描二维码登录（storageState 未命中）`,
             severity: 'critical',
@@ -238,6 +257,7 @@ export class MockApiClient implements AppApi {
           }
         : {
             id: `captcha_${accountId}_${stamp}`,
+            jobId: handle.jobId,
             title: '需要人工输入验证码',
             message: `账号 ${accountId} 在反爬验证码处受阻，AI 识别失败，请人工输入`,
             severity: 'critical',
@@ -251,7 +271,7 @@ export class MockApiClient implements AppApi {
           }
       this.addTicket(demo)
     }, 4000)
-    this.currentSimulation.timers.push(captchaTimer)
+    simulation.timers.push(captchaTimer)
 
     return this.cloneHandle(handle)
   }
@@ -321,9 +341,10 @@ export class MockApiClient implements AppApi {
 
     this.syncHandleStatus(simulation)
     if (simulation.handle.status === 'stopped') {
-      this.emitStoppedCompletion(jobId, simulation.handle.createdAt)
+      this.emitStoppedCompletion(simulation)
     }
-    this.addLog('warn', accountIds?.length ? 'Stopped selected accounts.' : 'Stopped job.')
+    this.addLog('warn', accountIds?.length ? 'Stopped selected accounts.' : 'Stopped job.',
+      jobId, simulation.platform)
   }
 
   async pauseSelected(jobId: string, accountIds: string[]): Promise<void> {
@@ -531,6 +552,7 @@ export class MockApiClient implements AppApi {
   }
 
   async resolveCaptcha(payload: {
+    jobId?: string
     ticketId: string
     accountId: number
     answer?: string
@@ -538,7 +560,8 @@ export class MockApiClient implements AppApi {
   }): Promise<void> {
     await sleep(150)
     const verb = payload.action === 'skip' ? 'skipped' : `answered "${payload.answer}"`
-    this.addLog('info', `Captcha ${payload.ticketId} ${verb} (account ${payload.accountId}).`)
+    this.addLog('info', `Captcha ${payload.ticketId} ${verb} (account ${payload.accountId}).`,
+      payload.jobId)
   }
 
   async getBalance(_provider?: 'doubao' | 'deepseek'): Promise<Balance> {
@@ -583,7 +606,7 @@ export class MockApiClient implements AppApi {
     return this.onWithCleanup('phaseChange', callback)
   }
 
-  onLog(callback: (line: { level: string; message: string; timestamp: number }) => void): () => void {
+  onLog(callback: (line: { jobId: string; platform?: Platform; level: string; message: string; timestamp: number }) => void): () => void {
     return this.onWithCleanup('log', callback)
   }
 
@@ -614,7 +637,9 @@ export class MockApiClient implements AppApi {
 
   dispose(): void {
     this.listeners.clear()
-    this.stopSimulation()
+    for (const simulation of [...this.simulations.values()]) {
+      this.stopSimulation(simulation)
+    }
   }
 
   private onWithCleanup<T>(event: string, callback: (payload: T) => void): () => void {
@@ -652,6 +677,7 @@ export class MockApiClient implements AppApi {
 
     this.emit('completed', {
       jobId: simulation.handle.jobId,
+      platform: simulation.platform,
       success: true,
       results: {
         totalSections: simulation.handle.courseCount * 10,
@@ -665,7 +691,8 @@ export class MockApiClient implements AppApi {
       timestamp: Date.now(),
     } satisfies CompletionEvent)
 
-    this.addLog('info', 'Job completed.')
+    this.addLog('info', `Job completed (${simulation.platform}).`,
+      simulation.handle.jobId, simulation.platform)
     this.addTicket(generateMockTickets(1)[0])
   }
 
@@ -714,6 +741,7 @@ export class MockApiClient implements AppApi {
 
       this.emit('progress', {
         jobId: simulation.handle.jobId,
+        platform: simulation.platform,
         phase: phase.name,
         phaseIndex: simulation.handle.phaseIndex,
         percent: simulation.handle.progress,
@@ -721,7 +749,8 @@ export class MockApiClient implements AppApi {
         timestamp: Date.now(),
       } satisfies ProgressEvent)
 
-      this.addLog('info', `[${phase.name}] ${Math.round(phase.progress)}%`)
+      this.addLog('info', `[${simulation.platform}] ${phase.name} ${Math.round(phase.progress)}%`,
+        simulation.handle.jobId, simulation.platform)
 
       if (phase.progress >= 100) {
         const previousPhase = phase.name
@@ -734,6 +763,7 @@ export class MockApiClient implements AppApi {
           nextPhase.status = 'running'
           this.emit('phaseChange', {
             jobId: simulation.handle.jobId,
+            platform: simulation.platform,
             fromPhase: previousPhase,
             toPhase: nextPhase.name,
             phaseIndex: simulation.handle.phaseIndex,

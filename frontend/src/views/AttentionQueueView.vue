@@ -112,18 +112,18 @@
         <template v-if="hasRunData">
           <div class="forecast__progress">
             <div class="forecast__progress-head">
-              <span class="forecast-item__label">整体进度</span>
-              <span class="forecast-item__value">{{ Math.round(executionStore.progress) }}%</span>
+              <span class="forecast-item__label">整体进度（{{ platformStore.meta.label }}）</span>
+              <span class="forecast-item__value">{{ Math.round(activeSlot.progress) }}%</span>
             </div>
             <ProgressBar
-              :percent="executionStore.progress"
-              :variant="executionStore.status === 'error' ? 'warn' : executionStore.status === 'completed' ? 'ok' : 'accent'"
+              :percent="activeSlot.progress"
+              :variant="activeSlot.status === 'error' ? 'warn' : activeSlot.status === 'completed' ? 'ok' : 'accent'"
               height="8px"
             />
           </div>
           <div class="forecast-grid">
             <div class="forecast-item">
-              <span class="forecast-item__value">{{ runningLanes }}/{{ executionStore.lanes.length }}</span>
+              <span class="forecast-item__value">{{ runningLanes }}/{{ activeSlot.lanes.length }}</span>
               <span class="forecast-item__label">运行席位</span>
             </div>
             <div class="forecast-item">
@@ -135,7 +135,7 @@
               <span class="forecast-item__label">{{ statusLabel }}</span>
             </div>
             <div class="forecast-item">
-              <span class="forecast-item__value">{{ executionStore.elapsedFormatted }}</span>
+              <span class="forecast-item__value">{{ executionStore.elapsedFormattedOf(activeSlot.platform) }}</span>
               <span class="forecast-item__label">耗时</span>
             </div>
           </div>
@@ -183,16 +183,19 @@ const platformStore = usePlatformStore()
 
 /* ── computed ── */
 
+/** 执行概况卡跟随当前平台上下文（双平台并行时各自的槽位独立展示）。 */
+const activeSlot = computed(() => executionStore.slotOf(platformStore.currentPlatform))
+
 const hasRunData = computed(() =>
-  executionStore.phases.length > 0 || executionStore.status !== 'idle',
+  activeSlot.value.phases.length > 0 || activeSlot.value.status !== 'idle',
 )
 
 const runningLanes = computed(() =>
-  executionStore.lanes.filter((lane) => lane.status === 'running').length,
+  activeSlot.value.lanes.filter((lane) => lane.status === 'running').length,
 )
 
 const statusColorKey = computed(() => {
-  switch (executionStore.status) {
+  switch (activeSlot.value.status) {
     case 'running': return 'low'
     case 'paused': return 'medium'
     case 'completed': return 'low'
@@ -202,7 +205,7 @@ const statusColorKey = computed(() => {
 })
 
 const statusBadge = computed(() => {
-  switch (executionStore.status) {
+  switch (activeSlot.value.status) {
     case 'running': return '▶'
     case 'paused': return '⏸'
     case 'completed': return '✓'
@@ -213,7 +216,7 @@ const statusBadge = computed(() => {
 })
 
 const statusLabel = computed(() => {
-  switch (executionStore.status) {
+  switch (activeSlot.value.status) {
     case 'running': return '运行中'
     case 'paused': return '已暂停'
     case 'completed': return '已完成'
