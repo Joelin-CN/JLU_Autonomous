@@ -77,3 +77,15 @@ playwright-cli 会话名规则是 `{platform}-chrome-{N}`（超星 `chaoxing-chr
 - 阶段总报告：[PARALLEL_JOBS_UPDATE_2026-09-12.md](../updates/PARALLEL_JOBS_UPDATE_2026-09-12.md)
 - 验证清单：[VALIDATION_AFTER_PARALLEL_JOBS_2026-09-12.md](../../validation/VALIDATION_AFTER_PARALLEL_JOBS_2026-09-12.md)
 - API 契约：[api.md v1.6 §4.1](../../design/api.md)
+
+---
+
+## 附：真机联测续记（2026-09-13）
+
+真机双 Python 进程联测（占位账号）暴露了**问题一的修复本身有回归**，并连带发现两处新问题，全部当场修复：
+
+1. **argparse 二次回归**：首版修复替换 argparse 块时误删 `--job-id`/`--accounts` 两个必选参数定义——usage 中出现新加的 `--budget-gb` 却没有 `--job-id`。**pytest 618 全绿、Electron mock 链路均不可见**（无测试以 CLI 方式带参拉起入口），只有真实 spawn 才暴露。修复后新增 `backend/tests/unit/test_cli_argparse_smoke.py`：以空 `--accounts`（两侧入口在校验段快速失败、不开浏览器）+ 完整参数集拉起两平台入口，锁定「Electron 注入的全部参数必须被 argparse 接受」契约。**教训：CLI 入口契约需要 subprocess 级冒烟，单元/mock 测试有盲区。**
+2. **智慧树协议处理器缺 `MEMORY` 分支**：`_protocol_handler` 只转发 LOG/PROGRESS/PHASE/TICKET，`core.memory.MemoryMonitor` 的快照被静默丢弃（T2 探针显示闸门在工作但 MEMORY=0）。补 `elif et == "MEMORY": _write_json_line(event)`，补后双平台各 3×MEMORY。
+3. **`accounts:list` 空参数**：handler 对 accounts 子命令传 `[]`，超星无参默认 list 掩盖了问题，智慧树 argparse `command` 必填 → 真实模式智慧树账号列表一直 exit 2。显式传 `['list']`。
+
+联测同时验证了原始修复的正确性：智慧树入口在真实 Electron 链路以完整内存参数启动（`--budget-gb 9.83 --max-concurrent 14`），预算闸门/监视器与超星同构工作。新观察项（MemoryMonitor 线程无异常兜底等）见验证清单 P2。

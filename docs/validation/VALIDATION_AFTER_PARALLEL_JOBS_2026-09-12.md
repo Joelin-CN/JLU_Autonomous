@@ -33,7 +33,26 @@
 - mock 演示验证码的 `accountId` 为字符串 id（`acct_*`），`parseAccountId` 报错文字压在弹层按钮边框上——**存量演示模式特有**（真实后端工单带数字 accountId），与本次改造无关，建议后续给 mock 演示工单用数字 accountId。
 - fullPage 截图中固定侧栏与长页面产生常见伪影（视口截图无此问题）；不影响真实渲染。
 - MEMORY 事件 mock 模式仍不发射（沿用现状）；执行页按平台分显预算仪表留作后续增量。
-- 双平台并行的**真机（Electron + 双 Python 进程）联测**未在本轮执行（需两平台真实账号同时在线）；mock 链路与单元层已全覆盖，真机联测建议在 PR review 时由 @Arthur-Pendrag0n 或后续会话补做。
+
+## P0 补充 — 真机双 Python 进程联测（2026-09-13，占位账号、真实账号零学习操作）
+
+三层真机验证全部通过（明细见下「真机联测记录」）：
+
+| # | 项 | 结果 | 证据 |
+|---|----|------|------|
+| P0-8 | 双平台真实 Python 进程并行 | ✅ 两进程同时存活（OS 级），STOP 后双双干净退出 | T2/T3 进程快照 |
+| P0-9 | 预算闸门（gate_open） | ✅ 预算 0.3 < 单实例 0.7 时账号线程持续 `memory budget full, waiting...`，**零浏览器打开**；T3 中智慧树停止后超星闸门**立即放行**（动态跟随全局占用） | T2 探针 / T3 日志 |
+| P0-10 | 动态剩余分账（Electron 全链路） | ✅ 智慧树先启独跑 `--budget-gb 9.83 --max-concurrent 14`；超星后启（并行放行）`--budget-gb 0.70 --max-concurrent 1` = clamp(全额−9.83, 最低保障 0.7, 全额)；`--system-limit-gb` 同口径 29.52/29.53 | T3 python.exe 命令行 |
+| P0-11 | MEMORY 事件双平台 | ✅ 双进程各 3 个 MEMORY 事件（budgetGB=0.3, remainingCount=0）——智慧树协议处理器补 MEMORY 分支后生效 | T2 探针 stdout |
+| P0-12 | 真实模式账号链路 | ✅ accounts:list 显式 `list` 子命令后两平台占位账号正常列出（此前智慧树 command 必填导致真实模式拉不到账号列表） | T3 应用内 |
+
+### 真机联测记录（T1/T2/T3）
+
+- **T1 分账数值（生产函数 + 真实测量）**：31.8GB 机器 → 全局预算 ~8.8-9.8GB（随基线波动）；独跑全额 / 后启 0.7GB 最低保障 / 急停线恒全机值，断言全过（含「授予总额 ≤ 全局 + 最低保障」的有界超卖不变式）。
+- **T2 双进程闸门探针（零浏览器）**：直接 spawn `platforms.{chaoxing,zhihuishu}.api`，预算 0.3GB + system-limit 200 → 22s 双进程并行存活、各 3×MEMORY、各 4 次闸门等待、STOP 后 exit 0。
+- **T3 Electron 全链路（computer-use 驱动真实窗口）**：占位账号经 `ZHIHUISHU_ACCOUNTS_FILE` 重定向；超星 3 账号 / 智慧树 1 账号真实启动；执行页双 banner 并存、侧栏双平台 running；超星后启拿 0.70GB 份额且**闸门挡住其开浏览器**（智慧树占用全局额度）→ 智慧树停止后超星闸门放行开始登录；分组「全部停止」后 python.exe 清退 count=0。
+- **联测发现并当场修复**：① 智慧树 argparse 丢 `--job-id/--accounts`（首轮 T2 暴露：此前补内存参数的编辑误删，pytest/mock 均不可见——已修复并新增 `test_cli_argparse_smoke.py` 2 例防回归，pytest 620 passed）；② 智慧树协议处理器缺 MEMORY 分支（monitor 事件被静默丢弃——已补）；③ accounts:list 空参数（已显式传 `list`）。
+- **联测新观察项（未修，记档）**：① `core/memory.py` MemoryMonitor 线程无异常兜底——真机多 Chrome 进程时 PowerShell CIM 采样可超 20s 超时 → 监视线程死亡（gate 的采样自带 fail-open 不受影响；建议后续 monitor 循环加 try/except + 降级）；② 扫码工单倒计时显示 `NaN:NaN`（工单 timeoutSeconds 缺省路径）；③ 智慧树占位账号 index-0 与真实账号共用 profile 目录——首轮联测曾恢复旧登录态 Cookie（仅登录态验证、未做任何学习操作即停止），后续占位联测应先移开 `storage-state.json`（本轮已移开并测完还原）。
 
 ## 复现演示流（dev mock）
 

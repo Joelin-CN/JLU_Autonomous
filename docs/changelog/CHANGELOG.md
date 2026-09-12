@@ -2,6 +2,14 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-13 — 真机双 Python 进程联测（占位账号）：分账/闸门/并行全验证 + 三处当场修复
+
+- **联测结论（T1/T2/T3 三层，真实账号零学习操作）**：①生产 `allocateBudget`+真实测量断言分账不变式；②直接双进程探针（预算 0.3GB<0.7 单实例）验证**闸门永不放行、零浏览器打开**、双路 MEMORY 事件、STOP 干净退出；③Electron 全链路（computer-use 驱动真实窗口，占位账号经 `ZHIHUISHU_ACCOUNTS_FILE` 重定向）：智慧树先启独跑 `--budget-gb 9.83`，超星后启**并行放行**拿最低保障 `--budget-gb 0.70 --max-concurrent 1`（动态剩余分账），且超星闸门被智慧树的全局占用挡住——智慧树停止后**立即放行**开浏览器（闸门动态跟随）；双 banner 并存，分组停止后 python 进程清退。
+- **联测暴露并当场修复 3 处**：①智慧树 argparse 丢 `--job-id/--accounts`（前日补内存参数的编辑误删；pytest/mock 均不可见，唯真机 spawn 暴露——已修 + 新增 `test_cli_argparse_smoke.py` 2 例防回归契约测试）；②智慧树协议处理器缺 `MEMORY` 分支（监视器事件被静默丢弃——补齐后 T2 双平台各 3×MEMORY）；③`accounts:list` 空参数（智慧树 accounts 子命令 `command` 必填 → 真实模式智慧树账号列表一直拉不到——显式传 `list`）。
+- **回归**：pytest **620 passed**（618+2 冒烟）；typecheck 0 错误。
+- **新观察项（记档未修）**：`core/memory.py` MemoryMonitor 线程无异常兜底（多 Chrome 时 CIM 采样 20s 超时→监视线程死亡，gate 采样 fail-open 不受影响，建议后续加 try/except 降级）；扫码工单倒计时 `NaN:NaN`；占位联测需先移开共享 profile 的 `storage-state.json`（本轮首轮曾恢复旧 Cookie 做登录态验证，未做任何学习操作即停止，文件已测后还原）。
+- 文档：验证清单补 P0-8~P0-12 真机联测条目与记录。
+
 ## 2026-09-12（续五）— 双平台并行任务执行（后端编排 + 渲染层多任务）
 
 - **同平台互斥、跨平台并行**：Electron 主进程从全局单任务（`activeJobId` + 单 `bridge`）重构为 **per-platform 槽位表**（`ipc/jobSlots.ts` 纯逻辑模块，vitest 可测）：`job:start` 按平台判占用（另一平台任务不阻塞）；pause/resume/stop/resolve-ticket 按 `jobId` 路由到对应槽位 bridge；进程 done/exit 经 `releaseIfCurrent` 身份守卫释放槽位（防旧进程迟到事件误清）；应用退出 `stopAllJobs()` 遍历全部槽位。IPC 通道名与 NDJSON 8 事件协议不变。
