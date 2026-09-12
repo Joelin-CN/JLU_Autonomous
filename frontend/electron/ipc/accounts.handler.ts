@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import path from 'path'
+import type { Platform } from '../types'
 import { spawn } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { resolvePythonPath } from '../python/resolve'
@@ -65,7 +66,7 @@ function toAccount(b: BackendAccount): Account {
   }
 }
 
-function runAccountsCommand(extraArgs: string[]): Promise<AccountsPayload> {
+function runAccountsCommand(extraArgs: string[], platform: Platform = 'chaoxing'): Promise<AccountsPayload> {
   return new Promise((resolve, reject) => {
     const pythonPath = getAccountsPython()
 
@@ -89,7 +90,12 @@ function runAccountsCommand(extraArgs: string[]): Promise<AccountsPayload> {
 
     let child
     try {
-      child = spawn(pythonPath, ['-m', 'chaoxing.accounts', ...extraArgs], {
+      if (platform === 'zhihuishu') {
+        safeEnv.ZHIHUISHU_ACCOUNTS_FILE =
+          process.env.ZHIHUISHU_ACCOUNTS_FILE
+          ?? path.join(DATA_DIR, 'passwords', 'zhihuishu.txt')
+      }
+      child = spawn(pythonPath, ['-m', `platforms.${platform}.accounts`, ...extraArgs], {
         cwd: CODE_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: safeEnv,
@@ -161,12 +167,13 @@ function requireIdle(): void {
 }
 
 export function registerAccountsHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH, () => {
-    return path.join(DATA_DIR, 'passwords', 'chaoxing.txt')
+  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH, (_e, p?: { platform?: Platform }) => {
+    const platform = (p?.platform === 'zhihuishu') ? 'zhihuishu' : 'chaoxing'
+    return path.join(DATA_DIR, 'passwords', `${platform}.txt`)
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_LIST, async () => {
-    const parsed = await runAccountsCommand([])
+    const parsed = await runAccountsCommand([], 'chaoxing')
     if (parsed.type !== 'ACCOUNTS') throw new Error('账号列表返回异常。')
     return parsed.accounts.map(toAccount)
   })

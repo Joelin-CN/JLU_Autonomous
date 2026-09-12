@@ -1,3 +1,6 @@
+/** 课程平台标识（后端 platforms/<platform> 对应）。 */
+export type Platform = 'chaoxing' | 'zhihuishu'
+
 export interface Account {
   id: number
   username: string
@@ -104,6 +107,8 @@ export interface PythonMemoryEvent {
 export type MemoryEvent = PythonMemoryEvent
 
 export interface StartJobPayload {
+  /** 目标平台（默认超星）。决定后端入口 platforms.<platform>.api 与凭据文件。 */
+  platform?: Platform
   accountIds: number[]
   courseIds?: string[]
   mode?: 'full' | 'scan_only' | 'solve_only'

@@ -11,7 +11,7 @@ import {
   measureProjectChromeGB,
   measureSystemUsedGB,
 } from '../memory/planner'
-import type {
+import type { Platform,
   JobControlPayload,
   JobLaneStatus,
   JobStatus,
@@ -190,13 +190,13 @@ function clearActiveJobIfCurrent(current: PythonBridge | null): void {
  *
  * Fire-and-forget per session: we don't block the stop response on it.
  */
-function closeBrowserSessions(accountIds: number[]): void {
+function closeBrowserSessions(accountIds: number[], platform: Platform = 'chaoxing'): void {
   const cli = process.platform === 'win32' ? 'playwright-cli.cmd' : 'playwright-cli'
   for (const id of accountIds) {
     try {
       // .cmd wrappers need shell:true on Windows; without it the close was
       // silently failing and Chrome lingered in Task Manager after every stop.
-      execFile(cli, [`-s=chaoxing-chrome-${id}`, 'close'], { shell: true, timeout: 20000 }, () => {
+      execFile(cli, [`-s=${platform}-chrome-${id}`, 'close'], { shell: true, timeout: 20000 }, () => {
         // Ignore: session may already be gone, or the daemon may be down.
       })
     } catch {
@@ -525,7 +525,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
               '--per-account-estimate-gb', String(plan.perAccountEstimateGB))
 
     try {
-      bridge.start(args, jobId)
+      bridge.start(args, jobId, payload.platform ?? 'chaoxing')
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       jobStatus.status = 'error'

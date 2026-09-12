@@ -2,7 +2,8 @@ import { ipcMain } from 'electron'
 import { spawn } from 'child_process'
 import { CODE_DIR, WORKSPACE_DIR, DATA_DIR } from '../backendPath'
 import { resolvePythonPath } from '../python/resolve'
-import type { Course, ScanCoursesPayload } from '../types'
+import path from 'path'
+import type { Course, Platform, ScanCoursesPayload } from '../types'
 import { IPC_CHANNELS } from '../types'
 
 /**
@@ -45,7 +46,7 @@ interface CoursesErrorPayload {
  * Spawn the courses CLI for a single 0-based account index and resolve the
  * discovered courses. Mirrors accounts.handler's spawn/parse contract.
  */
-function runCoursesQuery(accountIndex: number): Promise<Course[]> {
+function runCoursesQuery(accountIndex: number, platform: Platform = 'chaoxing'): Promise<Course[]> {
   return new Promise((resolve, reject) => {
     const pythonPath = getCoursesPython()
 
@@ -69,7 +70,12 @@ function runCoursesQuery(accountIndex: number): Promise<Course[]> {
 
     let child
     try {
-      child = spawn(pythonPath, ['-m', 'chaoxing.courses', '--account', String(accountIndex)], {
+      if (platform === 'zhihuishu') {
+        safeEnv.ZHIHUISHU_ACCOUNTS_FILE =
+          process.env.ZHIHUISHU_ACCOUNTS_FILE
+          ?? path.join(DATA_DIR, 'passwords', 'zhihuishu.txt')
+      }
+      child = spawn(pythonPath, ['-m', `platforms.${platform}.courses`, '--account', String(accountIndex)], {
         cwd: CODE_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: safeEnv,

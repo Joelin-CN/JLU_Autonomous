@@ -100,7 +100,7 @@ function runAiTest(provider: string = 'doubao-api'): Promise<{ ok: boolean; reas
     }
     env.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
     env.CHAOXING_DATA_DIR = process.env.CHAOXING_DATA_DIR ?? DATA_DIR
-    const child = spawn(python, ['-m', 'chaoxing.ai_config', 'test',
+    const child = spawn(python, ['-m', 'platforms.chaoxing.ai_config', 'test',
       '--provider', provider], {
       cwd: CODE_DIR, stdio: ['ignore', 'pipe', 'pipe'], env,
     })
