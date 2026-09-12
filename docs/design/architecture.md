@@ -1,85 +1,101 @@
-# 超星自动化脚本体系 — 架构全景
+# 后端自动化体系 — 架构全景（多平台）
 
-> 更新于 2026-06-24，基于当前代码 (v17+)  
-> 上次生成: 2026-06-22 (v16)
+> **版本**: 2.0　**最近更新**: 2026-09-12（同步智慧树 M0–M3 / core+platforms 平台架构落地）
+> 上一版: 2026-06-24（v17+ 单平台全景，见 [archive/](../changelog/archive/) 或 git 历史）
 
-> ⚠️ **历史参考（2026-06）**：DeepSeek 双引擎已移除，AI 仅支持 Doubao API；主入口已迁移至
-> `python -m chaoxing.api`（JSON-line 协议，Electron 使用）。最新契约见 [api.md](api.md) 与
-> [integration.md](integration.md)。
-
----
-
-## 一、三层架构总览
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│           chaoxing/orchestrator.py (编排层)                    │
-│                                                              │
-│  load_config() → discover_courses() → for each course:       │
-│    Phase 1: ChapterQuizSolver  (章节测试刷题)                  │
-│    Phase 2: ChapterContentBot  (视频/音频/文档自动完成)         │
-│                                                              │
-│  参数: --course, --dry-run, --resume, --scan-only, --status  │
-│        --quiz-only, --content-only, --all-accounts, --yes    │
-└───────────────┬────────────────────┬─────────────────────────┘
-                │                    │
-       ┌────────▼────────┐  ┌───────▼────────────────┐
-       │  Quiz Solver    │  │  Content Bot           │
-       │  (答题引擎)      │  │  (内容完成引擎)          │
-       │                 │  │                        │
-       │ 正常模式 /      │  │ v17 inline chaining    │
-       │ Grade-Only 模式  │  │ (自动下一节, 无需回树)   │
-       └────┬───────┬────┘  └──────┬───────┬─────────┘
-            │       │             │       │
-       ┌────▼──┐ ┌──▼────────┐ ┌──▼───┐ ┌─▼───────────┐
-       │字体解密│ │V2 逐题截图 │ │v17   │ │CAPTCHA处理  │
-       │→文本  │ │.TiMu容器  │ │顺序   │ │DOM+AI识图   │
-       │       │ │→批量识图  │ │播放   │ │自动填充     │
-       └───┬───┘ └───┬───────┘ └──┬───┘ └─────┬───────┘
-           │         │            │            │
-           └────┬────┘            │            │
-                │                 │            │
-     ┌──────────▼─────────────────▼────────────▼──────┐
-     │              AI 后端 (双引擎)                     │
-     │  ┌──────────────────┐ ┌──────────────────────┐  │
-     │  │ chaoxing/ai/     │ │ chaoxing/ai/         │  │
-     │  │ doubao.py        │ │ deepseek.py          │  │
-     │  │ HTTP API (快速)   │ │ 浏览器自动化 (识图)    │  │
-     │  │ OpenAI SDK       │ │ Tab 0: 文本          │  │
-     │  │ 多模态支持        │ │ Tab 1: 识图+深度思考  │  │
-     │  └──────────────────┘ └──────────────────────┘  │
-     └──────────────────────┬─────────────────────────┘
-                            │
-           ┌────────────────▼────────────────┐
-           │        playwright-cli            │
-           │  chaoxing-chrome-{N} sessions    │
-           │  deepseek session                │
-           └─────────────────────────────────┘
-```
+> ⚠️ **历史提示**：DeepSeek 双引擎已移除（AI 仅 Doubao API）；`chaoxing/` 包现为兼容垫片
+> （见 §二），实际实现位于 `core/` 与 `platforms/<platform>/`。最新契约见 [api.md](api.md)
+> 与 [integration.md](integration.md)。
 
 ---
 
-## 二、核心文件清单
+## 一、多平台架构总览（M1 落地，2026-09）
 
-### Python 包（chaoxing/ — 41 个模块，12 个子包）
+```
+Electron 主进程 (job:start, StartJobPayload.platform)
+        │  spawn python -m platforms.<platform>.api   (缺省 chaoxing)
+        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  core/  （平台无关层：协议 / 引擎 / 内存 / 追踪 / AI / 工具）    │
+│  orchestrator.py  多账号并发 · 内存门 · 泳道结果（ModuleRunner  │
+│                   惰性 getattr —— 平台模块按名解析）            │
+│  browser/  playwright-cli 封装（会话 {platform}-chrome-{N}）   │
+│  credentials.py  通用凭据解析（{...} 分块多账号格式）           │
+│  memory.py · tracking/ · ai/ · engine 协议层                  │
+└──────────────┬──────────────────────────────┬────────────────┘
+               ▼                              ▼
+   ┌──────────────────────┐        ┌──────────────────────────┐
+   │ platforms/chaoxing/  │        │ platforms/zhihuishu/     │
+   │ auth（密码登录+验证码）│        │ auth（扫码优先+密码/滑块   │
+   │ scanner · solvers/    │        │  兜底 + storageState 会话）│
+   │ （quiz / content bot）│        │ scanner（课程+章节树）     │
+   │ captcha · font        │        │ video（D6 原速播放）       │
+   └──────────┬───────────┘        │ accounts · courses 子命令 │
+              │                     └──────────┬───────────────┘
+              │                                │
+              ▼                                ▼
+   凭据 data/passwords/chaoxing.txt   凭据 data/passwords/zhihuishu.txt
+   档案 chrome-profiles/chaoxing-*/   档案 chrome-profiles/zhihuishu/account-N/
+                                      （含 storage-state.json 免扫码）
 
-| 子包 / 模块 | 行数 | 角色 | 关键入口 |
-|------|------|------|----------|
-| `chaoxing/orchestrator.py` | ~550 | **顶层调度** | `main()` → `run_for_account()` → `process_course()` |
-| `chaoxing/solvers/content/` | ~800 | **内容 bot** | `ChapterContentBot.run()` — v17 inline chaining |
-| `chaoxing/solvers/quiz/` | ~2500 | **刷题 bot** | `ChapterQuizSolver.run()` (正常模式 + Grade-Only 模式) |
-| `chaoxing/ai/deepseek.py` | ~150 | **AI Web 后端** | `DeepSeekWebSolver` — 浏览器自动化，双 Tab |
-| `chaoxing/ai/doubao.py` | ~100 | **AI API 后端** | `DoubaoAPISolver` — HTTP API / OpenAI SDK |
-| `chaoxing/platform/` | ~1400 | **平台集成** | auth.py, scanner.py, captcha.py |
-| `chaoxing/browser/` | ~200 | **浏览器引擎** | engine.py, js_runner.py — Playwright CLI 封装 |
-| `chaoxing/font/` | ~100 | **字体解密** | Typr.js + MD5 font-cxsecret |
-| `chaoxing/tracking/` | ~60 | **进度追踪** | ProgressTracker — 断点续传 |
-| `chaoxing/discover.py` | ~180 | **课程发现** | `discover_courses()` + `build_dynamic_course_config()` |
-| `chaoxing/config.py` | ~240 | **配置管理** | `ConfigManager` dataclass — 类型化配置 |
+   ┌───────────────────────────────────────────────────────────┐
+   │ chaoxing/（兼容垫片）: sys.modules 别名表 + 5 个 -m 入口自替换 │
+   │ 转发 → 旧命令 python -m chaoxing.api 与 monkeypatch 语义不变 │
+   └───────────────────────────────────────────────────────────┘
+```
 
-> **向后兼容**: `scripts/` 目录保留为 re-export shim，所有实际逻辑已迁移至 `chaoxing/` 包。原始实现（~8,959 行）保留在 `scripts/*.py` 中作为参考。
+- **NDJSON 事件协议平台无关**（8 事件类型不变，见 api.md §4.3）——平台差异只出现在
+  业务 payload（如智慧树扫码工单自带 `imageBase64` + `timeoutSeconds`）。
+- **环境变量**：`CHAOXING_*` 全平台语义保留；智慧树专属 `ZHIHUISHU_ACCOUNTS_FILE` /
+  `ZHIHUISHU_HEADED`（见 api.md §4.1 白名单表）。
+- **平台能力现状**：超星全套（扫描/内容/答题）；智慧树 M2（登录+扫描）+ M3（视频）已落地，
+  M4（答题）与滑块自动求解未做（见 [../roadmap/zhihuishu.md](../roadmap/zhihuishu.md)）。
 
-### JS 注入文件（位于 `chaoxing/js/`，`scripts/` 保留副本）
+## 二、后端目录与核心模块
+
+```text
+backend/
+├── core/               # 平台无关层（M1 从 chaoxing/ 上收）
+│   ├── orchestrator.py #   多账号编排 · ModuleRunner 惰性平台解析
+│   ├── credentials.py  #   通用 {...} 分块凭据解析
+│   ├── memory.py       #   预算公式 · CIM 采样 · MemoryMonitor
+│   ├── browser/        #   playwright-cli 封装 + orphans 孤儿清理
+│   ├── engine/         #   NDJSON 协议层（stdin 控制信号解析）
+│   └── ai/ · tracking/ · font/ · utils
+├── platforms/
+│   ├── chaoxing/       # 超星实现（auth/scanner/solvers/captcha/…，即原 chaoxing/ 包内容）
+│   └── zhihuishu/      # 智慧树实现（api/auth/scanner/video/accounts/courses）
+├── chaoxing/           # 兼容垫片（sys.modules 别名 + -m 入口转发，仅保旧入口可用）
+└── tests/              # unit / integration / e2e（618+ 用例，平台包各自覆盖）
+```
+
+| 模块 | 角色 | 说明 |
+|------|------|------|
+| `core/orchestrator.py` | **顶层调度** | `run_for_account()` → 平台模块按名解析（ModuleRunner），多账号并发/内存门/泳道结果 |
+| `platforms/chaoxing/solvers/` | **超星内容/刷题 bot** | `ChapterContentBot` / `ChapterQuizSolver`（v17 inline chaining；流程见 §三/§四） |
+| `platforms/zhihuishu/video.py` | **智慧树视频处理器** | D6 原速策略（§二.1） |
+| `platforms/*/auth.py` | **登录** | 超星：密码+验证码；智慧树：扫码优先（§二.1） |
+| `core/browser/` | **浏览器引擎** | playwright-cli 封装；会话 `{platform}-chrome-{N}`；`orphans.py` 通用孤儿清理 |
+| `core/ai/` | **AI 后端** | 仅 Doubao API（OpenAI SDK，文本+多模态识图）——DeepSeek 已移除 |
+
+### 二.1 智慧树链路要点（M2/M3 实测结论）
+
+- **登录（auth.py）**：扫码优先——扫码登录页二维码截图走 TICKET 工单（`imageBase64` +
+  `timeoutSeconds`，用户 App 扫码后自动继续）；密码登录兜底（必触发易盾滑块，自动化环境
+  被指纹检测拒绝，仅人工拖拽可行——D2 调研实证）；**storageState 会话**：登录成功导出
+  `chrome-profiles/zhihuishu/account-N/storage-state.json`，下轮任务注入 Cookie 实测**零扫码**
+  （75 cookies 恢复直接登录，扫描 34s vs 首轮扫码 105s）。
+- **视频（video.py，D6 决策）**：**仅 1.0 倍速真实播放**——不碰倍速菜单；播放/静音/下一节
+  全走站点控件真实点击；观察 JS 只读（`paused`/`currentTime`）；4–7s 人味轮询；**禁心跳伪造**。
+  实测 0.1 节 456/456s 原速完整播放，全程无人值守。
+- **三种弹窗自动化**：学前必读（右上角 X 带重试）、课程提醒（「下次再说」每轮清扫）、
+  **弹题（试选 → `.answer` 揭示正确项 → 改选，纯 DOM 处理，不依赖 AI）**。
+- **锁课红线**：异常学习行为会**锁课**（M0 调研实测触发）——锁课检测 → 跳过 + 申诉链接工单；
+  工程红线已固化（禁倍速/禁伪造，见 roadmap ADR D6）。
+- **章节树**：el-scrollbar 懒加载，需滚动加载全量节点（~38 节点实测）。
+
+
+### JS 注入文件（位于 `platforms/chaoxing/js/`，`scripts/` 保留副本）
 
 | 文件 | 注入方式 | 角色 |
 |------|----------|------|
@@ -99,7 +115,7 @@
 
 ---
 
-## 三、Content Bot 处理流程（视频）
+## 三、Content Bot 处理流程（视频，`platforms/chaoxing/`）
 
 ```
 ChapterContentBot.run(start_chapter, start_section)
@@ -156,7 +172,7 @@ ChapterContentBot.run(start_chapter, start_section)
 
 ---
 
-## 四、Quiz Solver 答题流程
+## 四、Quiz Solver 答题流程（`platforms/chaoxing/`）
 
 ```
 ChapterQuizSolver.run()  (正常模式 / grade_only 模式)
@@ -218,7 +234,7 @@ ChapterQuizSolver.run()  (正常模式 / grade_only 模式)
 
 ---
 
-## 五、CAPTCHA 处理链
+## 五、CAPTCHA 处理链（`platforms/chaoxing/`；智慧树登录工单形态见 api.md §3.2）
 
 ```
 触发点:
@@ -267,12 +283,15 @@ ChapterQuizSolver.run()  (正常模式 / grade_only 模式)
 
 ---
 
-## 六、AI 后端双引擎
+## 六、AI 后端（`core/ai/`）
 
-### 6.1 Doubao API (doubao_api.py) — 默认，HTTP API
+> DeepSeek Web 引擎已于 2026-08 移除，**AI 仅支持 Doubao API**（渲染层 `AIProvider` 类型
+> 固化为 `'doubao'`，后端任意 provider 值归一化）。
+
+### Doubao API — HTTP API
 
 ```
-doubao_api.py
+core/ai/（doubao）
 │
 ├─ _read_doubao_credentials()
 │   └─ 解析 data/passwords/doubao.txt → ARK_API_KEY + model
@@ -286,52 +305,16 @@ doubao_api.py
 │   └─ 多模态: text prompt + N 张 base64 图片 → 单次 API 调用
 │
 └─ doubao_ask_image(paths, prompt, timeout=180)
-    └─ 通用多模态查询 (CAPTCHA 识别, Phase C 批改)
+    └─ 通用多模态查询 (CAPTCHA 识别, 批改)
 ```
 
-### 6.2 DeepSeek Web (deepseek_web.py) — 浏览器自动化
-
-```
-deepseek_web.py
-│
-├─ _state = {}                              ← 会话级缓存
-│
-├─ Tab 0: 文本模式
-│   └─ ensure_deepseek_ready()
-│       ├─ 打开/验证 deepseek session
-│       ├─ 登录 (从 data/passwords/pwd.txt)
-│       ├─ tab-select 0
-│       └─ _ensure_quick_mode_with_toggles()  ← 仅首次 (缓存)
-│           ├─ 快速模式 ON, 深度思考 ON, 智能搜索 ON
-│
-├─ Tab 1: 识图模式
-│   └─ ensure_deepseek_image_ready()
-│       ├─ 打开/验证 deepseek session
-│       ├─ tab-select 1
-│       └─ _ensure_image_mode_with_toggles()
-│           ├─ 点击 识图模式 toggle
-│           └─ Escape 关闭 file chooser
-│
-├─ 文本提问: ask_deepseek(question, timeout)
-│   └─ fill textbox + click 发送 → poll 等待回答
-│
-├─ 图片提问: ask_deepseek_image(paths, prompt, timeout)
-│   └─ upload 图片 → fill prompt → click 发送 → poll 等待
-│
-└─ Quiz 专用:
-    ├─ deepseek_solve_quiz(text, course, section) → Tab 0
-    └─ deepseek_solve_quiz_image(paths, course, section) → Tab 1
-```
-
-### 6.3 AI 路由 (utils.py)
+### AI 路由 (utils.py)
 
 ```python
-ai_solve_quiz()        → 按 provider 配置选择 doubao/deepseek (文本)
-ai_solve_quiz_image()   → 按 provider 配置选择 doubao/deepseek (识图)
-ai_grade_quiz_image()   → 按 provider 配置分发 (批改)
+ai_solve_quiz()         → doubao (文本)
+ai_solve_quiz_image()   → doubao (识图)
+ai_grade_quiz_image()   → doubao (批改)
 ```
-
-Provider 由 `chaoxing_config.json` 中 `ai.provider` 决定: `"doubao-api"` (默认) 或 `"deepseek-web"`。
 
 ---
 
@@ -435,22 +418,19 @@ Debug array 示例：
 
 ---
 
-## 十、配置课程状态 (chaoxing_config.json)
+## 十、配置（chaoxing_config.json）
 
-| P | 课程 | 进度 | 任务类型 |
-|---|------|------|----------|
-| 1 | 概率论与数理统计 | 79/100 | 16 quiz sections + 4 content sections |
-| 2 | 大学物理ABC（下） | 0/88 | 7 chapters × 视频/文档 |
-| 3 | 综合英语-2025 | 0/77 | 5 units × 视频/文档 |
-
-AI Provider 默认: `doubao-api` (HTTP API, 快速, 支持多模态)
+`backend/chaoxing_config.json` 为共享配置（课程过滤、超时/重试参数、session 名称；示例见
+`chaoxing_config.example.json`）。AI Provider 固定 `doubao-api`。**个人课程进度等运行时数据
+不入库、不写入文档**（凭据与数据红线见 [../standards/secrets.md](../standards/secrets.md)）。
 
 ---
 
 ## 十一、运行命令速查
 
-> ⚠️ 以下 `python -m chaoxing.orchestrator --xxx` 与 `scripts/*.py` 直跑方式仅保留向后兼容 shim
-> （`scripts/chaoxing_orchestrator.py`）；主入口为 `python -m chaoxing.api`（Electron JSON-line 协议）。
+> ⚠️ 多平台布局（M1）后：任务主入口为 `python -m platforms.<platform>.api`（Electron 按
+> `StartJobPayload.platform` spawn，缺省 chaoxing）。以下 `python -m chaoxing.*` 旧命令经
+> `chaoxing/` 兼容垫片自替换转发，语义完全不变；`scripts/*.py` 为更早的向后兼容 shim。
 
 ```bash
 # === 推荐方式：通过 Python 包入口 ===
@@ -493,11 +473,12 @@ chaoxing_cli.bat full-auto --all-accounts --headed
   （扣除遗留项目 Chrome 占用），计算内存预算与 CPU 保险值，把
   `--max-concurrent/--budget-gb/--system-limit-gb/--per-account-estimate-gb`
   传给 Python；运行时只消费后端 `MEMORY` 事件驱动仪表。
-- **Python 后端**：`chaoxing/memory.py` 提供预算公式、PowerShell CIM 采样与
-  `MemoryMonitor`；`orchestrator.run_multi_account` 用运行时信号量排队，每个账号
-  在打开 Chrome 前执行 `gate_open()` 预算闸门，超预算等待、绝不瞬时突破。
+- **Python 后端**：`core/memory.py` 提供预算公式、PowerShell CIM 采样与
+  `MemoryMonitor`（M1 已上收至 core，平台无关）；`core/orchestrator.run_multi_account`
+  用运行时信号量排队，每个账号在打开 Chrome 前执行 `gate_open()` 预算闸门，超预算等待、
+  绝不瞬时突破。
 - **凭据**：AI key 由主进程原子写 `data/passwords/doubao.txt`（`.bak` 备份、
-  写后读回校验，只回显尾号）；账号增删改由 `chaoxing.accounts` 子命令原子写
+  写后读回校验，只回显尾号）；账号增删改由 `platforms.<platform>.accounts` 子命令原子写
   当前生效账号文件（`CHAOXING_ACCOUNTS_FILE` 可覆盖路径），显式编号防止档案错位。
 - **任务运行中**锁定所有写操作（AI 配置、账号、账号路径），由主进程 `jobState`
   统一把关。

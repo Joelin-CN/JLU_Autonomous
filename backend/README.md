@@ -1,26 +1,32 @@
-# 超星学习通自动化 (Chaoxing Auto-Course)
+# 后端 (JLU Autonomous Backend) — 多平台课程自动化
 
-自动完成超星学习通平台的课程任务：章节测试刷题、视频/文档自动完成、多课程批量处理。
+自动完成多平台网课任务：**超星学习通**（章节测试刷题、视频/文档自动完成、AI 答题、多账号并发）
+与**智慧树**（扫码登录、课程/章节扫描、1.0 倍速视频任务；答题 M4 建设中）。
+两平台共用同一 JSON-line 协议与 `core/` 平台无关层，平台实现位于 `platforms/<platform>/`。
 
 ## 快速开始
 
 ### 方式 1：JSON-line 协议（前后端分离，推荐）
 
-通过 `chaoxing/api.py` 启动后端，使用 JSON-line 协议与 Electron 前端通信：
+Electron 按 `StartJobPayload.platform` spawn 对应平台入口（缺省 chaoxing）；也可直跑：
 
 ```bash
-# 全自动处理账号 0 的所有课程
-python -m chaoxing.api --job-id "job_001" --accounts "0" --mode full
+# 超星——全自动处理账号 0 的所有课程（platforms 入口；旧 chaoxing.* 垫片入口语义不变）
+python -m platforms.chaoxing.api --job-id "job_001" --accounts "0" --mode full
 
-# 仅扫描课程（不答题）
-python -m chaoxing.api --job-id "job_002" --accounts "0" --mode scan_only
+# 超星——仅扫描 / 仅刷题
+python -m platforms.chaoxing.api --job-id "job_002" --accounts "0" --mode scan_only
+python -m platforms.chaoxing.api --job-id "job_003" --accounts "0" --mode solve_only --courses "高等数学"
 
-# 仅刷题（跳过内容）
-python -m chaoxing.api --job-id "job_003" --accounts "0" --mode solve_only --courses "高等数学"
+# 智慧树——扫描（凭据 data/passwords/zhihuishu.txt；登录扫码优先，storageState 命中免扫码）
+python -m platforms.zhihuishu.api --job-id "job_004" --accounts "0" --mode scan_only
 
-# 多账号并行
-python -m chaoxing.api --job-id "job_004" --accounts "0,1,2" --mode full
+# 多账号并行（core/orchestrator 内存门自动排队）
+python -m platforms.chaoxing.api --job-id "job_005" --accounts "0,1,2" --mode full
 ```
+
+> 平台专属环境变量：`ZHIHUISHU_ACCOUNTS_FILE`（凭据文件覆盖）、`ZHIHUISHU_HEADED`（有头模式）；
+> `CHAOXING_*` 变量族全平台语义保留（见 `docs/design/api.md` §4.1 白名单表）。
 
 **CLI 参数：**
 
@@ -96,6 +102,15 @@ Python 依赖：运行时只需 `pip install -r requirements.txt`（openai 必�
 }
 ```
 
+**`passwords/zhihuishu.txt`** — 智慧树账号（支持多账户，`{...}` 分块格式同上；任务运行期也可
+扫码登录，登录态持久化在 `data/chrome-profiles/zhihuishu/account-N/storage-state.json`，命中免扫码）：
+```text
+{
+    account[0]:学号或手机号
+    password[0]:密码
+}
+```
+
 **`passwords/doubao.txt`** — 豆包 API 密钥（AI 答题，provider=doubao-api）：
 ```text
 ARK_API_KEY="ark-..."
@@ -118,43 +133,25 @@ model="deepseek-v4-flash-vision-exp"
 ## 项目结构
 
 ```
-Chaoxing_auto/backend\
-├── chaoxing/                  # ★ 核心 Python 包（47 模块，前后端分离）
-│   ├── api.py                 # JSON-line 协议入口（StdioProtocol + StdinController）
-│   ├── orchestrator.py        # 顶层编排器（RunConfig + run_multi_account）
-│   ├── constants.py           # 全局常量（路径、信号、并发限制）
-│   ├── logging_setup.py       # 结构化日志 + 协议桥接 + RAM 守卫
-│   ├── config.py              # 配置管理
-│   ├── session.py             # 线程级浏览器会话管理
-│   ├── ai/                    # AI 答题后端
-│   │   ├── doubao.py          # 豆包 API（OpenAI SDK）
-│   │   ├── _base.py           # AISolver 抽象基类
-│   │   ├── router.py          # AI 后端路由
-│   │   └── prompts.py         # 提示词构建
-│   ├── browser/               # 浏览器自动化层
-│   │   ├── engine.py          # playwright-cli 底层封装
-│   │   ├── js_runner.py       # JS 脚本注入
-│   │   └── viewport.py        # 视口管理
-│   ├── platform/              # 平台适配层
-│   │   ├── auth.py            # 登录 + 凭证读取
-│   │   ├── scanner.py         # 课程/章节扫描
-│   │   ├── captcha.py         # 验证码识别
-│   │   └── navigation.py      # 页面导航
-│   ├── solvers/               # 答题 + 内容完成引擎
-│   │   ├── quiz/              # 章节测试刷题
-│   │   └── content/           # 视频/文档自动完成
-│   ├── tracking/              # 进度追踪
-│   ├── discover/              # 课程发现
-│   └── js/                    # 注入用 JavaScript（字体解密/播放器）
-├── chaoxing_config.json       # ★ 主配置（课程列表/URL/超时/重试，项目根目录）
-├── scripts/                   # 向后兼容 Shim 层
-│   ├── utils.py               # → chaoxing.* 重导出
-│   ├── chaoxing_orchestrator.py  # ps1 CLI 入口 shim
-│   └── ...
-├── chaoxing_cli.ps1           # PowerShell 交互式 CLI（向后兼容）
-├── chaoxing_cli.bat           # 最小启动器
-└── tests/                     # 测试套件
-    └── unit/                  # 单元测试（595 pass / 595）
+backend/
+├── core/                      # ★ 平台无关层（M1 从 chaoxing/ 上收）
+│   ├── orchestrator.py        #   多账号编排（ModuleRunner 惰性平台解析 + 内存门）
+│   ├── engine/                #   JSON-line 协议层（stdout 事件 / stdin 控制信号）
+│   ├── browser/               #   playwright-cli 封装 + orphans 孤儿 Chrome 清理
+│   ├── credentials.py         #   通用 {...} 分块多账号凭据解析
+│   ├── memory.py              #   预算公式 / CIM 采样 / MemoryMonitor
+│   ├── ai/ · tracking/ · font/ · utils
+├── platforms/
+│   ├── chaoxing/              # ★ 超星实现（auth / scanner / solvers{quiz,content} /
+│   │                          #   captcha / js 注入 / accounts / courses 子命令）
+│   └── zhihuishu/             # ★ 智慧树实现（auth 扫码+storageState / scanner 章节树 /
+│                              #   video D6 原速 / accounts / courses 子命令；M4 答题进行中）
+├── chaoxing/                  # 兼容垫片：sys.modules 别名 + -m 入口自替换转发
+│                              #（旧命令 python -m chaoxing.api 语义完全不变）
+├── chaoxing_config.json       # 主配置（课程过滤/超时/重试；example 版入库）
+├── scripts/                   # 向后兼容 Shim 层（→ chaoxing.* 重导出）
+├── chaoxing_cli.ps1/.bat      # PowerShell 交互式 CLI（向后兼容）
+└── tests/                     # 测试套件（unit / integration / e2e）
 ```
 
 > 运行时产物（`output/` / `temp/` / `logs/` / `passwords/` / `chrome-profiles/`）统一落在仓库根级 `data/`。

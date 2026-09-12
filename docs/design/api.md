@@ -1,9 +1,16 @@
-# 前后端交互 API 文档 — 超星助手
+# 前后端交互 API 文档 — JLU Autonomous
 
-> **版本**: v1.4
-> **更新**: 2026-08-13
+> **版本**: v1.5
+> **更新**: 2026-09-12
 > **审计**: 多 Agent 并行全代码库审查 + correctness pass 续轮校正
 > **目的**: 定义前端 (Electron + Vue 3) 与后端 (Python/JS 脚本) 之间的完整接口契约，供前后端独立开发和后续仓库融合使用。
+
+> **v1.5 变更**：同步智慧树 M0–M3 落地后的多平台现状——`StartJobPayload.platform` /
+> `ScanCoursesPayload.platform`（缺省 chaoxing）、spawn 入口 `platforms.<platform>.api|accounts|courses`
+> 与按平台凭据/会话隔离（`ZHIHUISHU_ACCOUNTS_FILE` / `ZHIHUISHU_HEADED` env 白名单、
+> `{platform}-chrome-{N}` 会话、`chrome-profiles/zhihuishu/account-N/` 档案）、`accounts:default-path`
+> 按平台返回 `passwords/<platform>.txt`。**NDJSON 8 事件协议无 breaking change**（§4.3 事件类型与
+> 字段结构平台无关）。渲染层（preload/ipcClient/store）的平台透传尚未合入 main，见 §3.2 `accounts:list` 备注。
 
 > **v1.4 变更**：同步 2026-08-13 代码现状（2026-08-22 修订：invoke 通道 28 个）。Pinia Store 9 个、
 > `courses:*` / `accounts:list` 已接真实后端、`--chromium-flags` 已移除、DeepSeek 完全移除
@@ -89,6 +96,8 @@
 **请求参数 (`StartJobPayload`)**:
 ```typescript
 interface StartJobPayload {
+  platform?: Platform         // 'chaoxing' | 'zhihuishu'，缺省 'chaoxing'。决定后端入口
+                             // platforms.<platform>.api 与凭据文件（见 §3.2 job:start）
   objective: ObjectiveType    // 'catchup' | 'exam-sprint' | 'maintenance' | 'custom'
   strategy: StrategyType      // 'balanced' | 'careful' | 'overnight' | 'surgical'
   mode: ModeType              // 'course-scan' | 'section-scan' | 'single-exec' | 'batch-exec' | 'full-auto' | 'dry-run'
@@ -620,7 +629,7 @@ const IPC_CHANNELS = {
 | `system:resources` | 实时 RAM/CPU/运行时长（Node `os` 采样，无 Python） |
 | `memory:plan` | 空闲时按当前机器状态计算的并发计划 |
 | `ai:status` / `ai:set` / `ai:test` | AI 配置读取 / 原子写 `doubao.txt` / 方舟连通性测试 |
-| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径 |
+| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径；`default-path` 接受 `{ platform? }` 按平台返回 `passwords/<platform>.txt`（main 版 preload 暂未暴露参数，渲染层走默认 chaoxing） |
 | `dialog:open-file` | 文件选择器（自定义账号文件） |
 | `on-memory` | 后端 `MEMORY` 事件推送（预算仪表） |
 
@@ -629,13 +638,19 @@ const IPC_CHANNELS = {
 #### `job:start`
 
 - **方向**: Renderer → Main
-- **请求**: `StartJobPayload { accountIds: number[], courseIds?: string[], mode?: 'full' | 'scan_only' | 'solve_only' }`
+- **请求**: `StartJobPayload { platform?: 'chaoxing' | 'zhihuishu', accountIds: number[], courseIds?: string[], mode?: 'full' | 'scan_only' | 'solve_only' }`
 - **返回**: `{ jobId: string }`
 - **限流**: 500ms 冷却
 - **校验**:
   - `accountIds`: 必填，最多 50 个，必须为正整数（支持 string → parseInt 转换）
   - **RAM 安全检查**: 启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算最大并发，超预算账号排队分批执行；运行中每 5 秒实测收紧。
   - **互斥检查**: 同一时间只允许一个活跃任务
+- **平台路由**（M1 多平台架构）: `platform` 缺省 `'chaoxing'`。PythonBridge 按 platform spawn
+  `python -m platforms.<platform>.api`（`chaoxing/` 兼容垫片保证旧入口 `python -m chaoxing.api` 语义不变）；
+  凭据文件按平台分流——chaoxing 走 `CHAOXING_ACCOUNTS_FILE`/`data/passwords/chaoxing.txt`，
+  zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`（默认 `data/passwords/zhihuishu.txt`）；
+  有头模式 zhihuishu 支持 `ZHIHUISHU_HEADED`（`CHAOXING_HEADED` 继续全平台生效）。
+  浏览器会话按 `{platform}-chrome-{N}` 隔离（zhihuishu 档案目录 `chrome-profiles/zhihuishu/account-N/`）。
 - **行为**: 创建 Job 记录 → 创建 PythonBridge → 绑定事件 → spawn Python 子进程
 
 #### `job:pause`
@@ -716,9 +731,12 @@ type JobPhase =
 #### `courses:scan`
 
 - **方向**: Renderer → Main
-- **请求**: `ScanCoursesPayload { accountIds: number[], courseIds?: string[] }`
+- **请求**: `ScanCoursesPayload { accountIds: number[], courseIds?: string[], platform?: 'chaoxing' | 'zhihuishu' }`
 - **返回**: `Course[]`（Electron 内部类型）
-- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.courses --account N` 读取发现状态；未扫描返回空列表（`scanned=false`）
+- **平台路由**: `platform` 缺省 `'chaoxing'`——spawn `python -m platforms.<platform>.courses --account N`
+  读取发现状态（发现文件按平台独立）；zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`。
+  未扫描返回空列表（`scanned=false`，非错误）
+- **当前状态**: ✅ 已接真实后端
 
 ```typescript
 interface Course {
@@ -754,7 +772,10 @@ interface CourseSection {
 - **方向**: Renderer → Main
 - **请求**: 无
 - **返回**: `Account[]`（Electron 内部类型）
-- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.accounts` 读取当前账号文件
+- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.accounts` 读取当前账号文件。
+  主进程侧 `runAccountsCommand` 已支持 platform 参数（spawn `platforms.<platform>.accounts`、
+  zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE` 默认 `data/passwords/zhihuishu.txt`），但 preload
+  暂未暴露该参数（渲染层固定走 chaoxing 账号文件）——渲染层平台透传见后续前端多平台 PR
 
 ```typescript
 interface Account {
@@ -954,7 +975,7 @@ interface PythonResultEvent {
 ### 4.1 进程启动
 
 ```
-spawn('python', ['-m', 'chaoxing.api', ...args], {
+spawn('python', ['-m', 'platforms.<platform>.api', ...args], {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: {
     PYTHONUNBUFFERED: '1',
@@ -963,7 +984,11 @@ spawn('python', ['-m', 'chaoxing.api', ...args], {
 })
 ```
 
-**入口**: `python -m chaoxing.api`（后端 repo 提供）
+**入口**: `python -m platforms.<platform>.api`（M1 多平台布局；`<platform>` 为 `chaoxing` 或
+`zhihuishu`，由 `job:start` 的 `StartJobPayload.platform` 决定，缺省 `chaoxing`）。
+`backend/chaoxing/` 兼容垫片保留旧入口 `python -m chaoxing.api` —— sys.modules 别名 +
+`-m` 入口自替换转发，旧命令与 monkeypatch 语义完全不变。两平台共用同一 NDJSON 事件协议
+（§4.3，**协议无 breaking change**——8 个事件类型与字段结构平台无关，差异只在业务 payload 内容）。
 
 **命令行参数**:
 
@@ -992,8 +1017,10 @@ spawn('python', ['-m', 'chaoxing.api', ...args], {
 | `PYTHONUNBUFFERED=1` | 强制无缓冲输出（必需） |
 | `CHAOXING_WORKSPACE` | 项目工作目录（dev=backend/，打包=userData/workspace） |
 | `CHAOXING_DATA_DIR` | 运行数据根（dev=仓库 data/，打包=userData/data） |
-| `CHAOXING_HEADED` | 浏览器可见模式 (`"1"` / `"0"`) |
-| `CHAOXING_ACCOUNTS_FILE` | 账号凭证文件覆盖路径（系统设置下发） |
+| `CHAOXING_HEADED` | 浏览器可见模式 (`"1"` / `"0"`)，全平台生效 |
+| `CHAOXING_ACCOUNTS_FILE` | 账号凭证文件覆盖路径（系统设置下发；chaoxing 语义） |
+| `ZHIHUISHU_ACCOUNTS_FILE` | 智慧树凭据文件（默认 `data/passwords/zhihuishu.txt`） |
+| `ZHIHUISHU_HEADED` | 智慧树浏览器可见模式覆盖（不设则跟随 `CHAOXING_HEADED`） |
 | `CHAOXING_TIMEOUT_PAGE_LOAD` | 页面加载超时（秒） |
 | `CHAOXING_TIMEOUT_SNAPSHOT` | 快照超时（秒） |
 | `CHAOXING_TIMEOUT_CLICK_ACTION` | 点击超时（秒） |

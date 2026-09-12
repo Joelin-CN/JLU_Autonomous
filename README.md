@@ -9,7 +9,7 @@
 | 平台 | 状态 | 说明 |
 |------|------|------|
 | 超星学习通 | ✅ 已支持 | 现有全部功能：课程扫描、章节处理、AI 测验答题、多账号并发 |
-| 智慧树 (zhihuishu.com) | 🚧 规划中 | 目标：同级别自动化能力；路线图与调研骨架见 [docs/roadmap/zhihuishu.md](docs/roadmap/zhihuishu.md) |
+| 智慧树 (zhihuishu.com) | 🚧 建设中 | 登录（扫码优先 + storageState 免扫码）✅ · 课程/章节扫描 ✅ · 视频任务（D6 决策：仅 1.0 倍速真实播放）✅ · 答题求解（M4）🚧 · 滑块自动求解 🚧 专项（密码登录易盾滑块当前仅人工处理）；路线图见 [docs/roadmap/zhihuishu.md](docs/roadmap/zhihuishu.md) |
 
 ## 项目结构
 
