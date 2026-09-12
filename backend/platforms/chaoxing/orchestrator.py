@@ -50,8 +50,43 @@ from .solvers.content.bot import ChapterContentBot
 #  Session / Login helpers
 # ══════════════════════════════════════════════════════════════════
 
-class AccountRunError(RuntimeError):
-    """Raised when one or more account lanes finished with a hard failure."""
+# 泳道硬失败异常已上收到 core；再导出保持 chaoxing.orchestrator.AccountRunError 可用
+from core.orchestrator import AccountRunError  # noqa: E402,F401  (re-export)
+
+
+# ── core 编排机钩子（ModuleRunner 惰性读取；函数体在调用时解析全局，
+#    因此对 chaoxing.orchestrator.* 的 monkeypatch 全部生效）─────────
+
+def run_account(account_index, creds, config):
+    return run_for_account(account_index, creds, config)
+
+
+def config_cls(**kwargs):
+    """RunConfig 工厂（core 编排机经此构建平台配置对象）。"""
+    return RunConfig(**kwargs)
+
+
+def read_credentials():
+    return read_all_chaoxing_credentials()
+
+
+def close_browser(account_index: int):
+    close_chaoxing_browser(account_index)
+
+
+def session_name(account_index: int) -> str:
+    return f"chaoxing-chrome-{account_index}"
+
+
+def thread_name(account_index: int) -> str:
+    return f"chaoxing-account-{account_index}"
+
+
+def max_concurrent_cfg():
+    try:
+        return get_config().max_concurrent
+    except Exception:
+        return None
 
 
 def ensure_logged_in(account_index: int = 0) -> bool:
@@ -347,92 +382,12 @@ _THREAD_STAGGER_SECONDS = 0.5
 def _run_account_in_thread(account_index: int, creds: dict, args, semaphore,
                            monitor, budget_gb, initial_estimate_gb,
                            results: list = None, results_lock=None):
-    """Thread target: wraps run_for_account with exception handling.
-
-    Sets the thread name for logging. Catches all exceptions so one
-    account's failure does not crash other threads.
-
-    Waits on the runtime-sized semaphore, then checks the live memory
-    budget before opening a browser. budget_gb=None disables the live gate
-    (CLI runs fall back to the semaphore alone). ``results`` (when provided)
-    collects each lane's final outcome so a hard account failure can surface
-    to the job instead of being swallowed.
-    """
-    tname = f"chaoxing-account-{account_index}"
-    threading.current_thread().name = tname
-    progress(account_index, "Queued (waiting for a slot)", lane_status="queued")
-
-    semaphore.acquire()
-    try:
-        if SHUTDOWN_FLAG.is_set():
-            progress(account_index, "Skipped (shutdown)", lane_status="error")
-            _record_thread_result(results, results_lock, account_index,
-                                  ok=True, reason="skipped (shutdown)")
-            return
-
-        if budget_gb is not None:
-            while not SHUTDOWN_FLAG.is_set():
-                try:
-                    project_gb = measure_project_chrome_gb()
-                except MemorySamplerError:
-                    project_gb = 0.0
-                est = monitor.effective_estimate_gb() if monitor \
-                    else initial_estimate_gb
-                if gate_open(project_gb, budget_gb, est):
-                    break
-                log(f"Account {account_index}: memory budget full, waiting...",
-                    "WARN")
-                human_delay(_GATE_RETRY_SECONDS, 0.2)
-            if SHUTDOWN_FLAG.is_set():
-                progress(account_index, "Skipped (shutdown)", lane_status="error")
-                _record_thread_result(results, results_lock, account_index,
-                                      ok=True, reason="skipped (shutdown)")
-                return
-
-        if monitor:
-            monitor.adjust_active_count(+1)
-        progress(account_index, "Starting", lane_status="running")
-        ok = run_for_account(account_index, creds, args)
-        _record_thread_result(results, results_lock, account_index,
-                              ok=ok is not False,
-                              reason=None if ok is not False else "login failed")
-    except KeyboardInterrupt:
-        log(f"Interrupted by user", "WARN")
-        SHUTDOWN_FLAG.set()
-        _record_thread_result(results, results_lock, account_index,
-                              ok=True, reason="stopped by user")
-    except Exception as e:
-        log(f"Fatal error in thread for account {account_index}: {e}", "ERROR")
-        log_exception(f"Account {account_index}: thread crash", exc=e)
-        progress(account_index, "FAILED", lane_status="error")
-        _record_thread_result(results, results_lock, account_index,
-                              ok=False, reason=str(e))
-    finally:
-        if monitor:
-            monitor.adjust_active_count(-1)
-        # Tear down the browser session this thread opened. playwright-cli
-        # keeps Chrome alive as a daemon between commands, so without an
-        # explicit close the Chrome processes linger after every job (the
-        # orphaned-Chrome-in-Task-Manager symptom). Login persists via the
-        # on-disk profile, so the next run reopens already logged in.
-        try:
-            close_chaoxing_browser(account_index)
-        except Exception as e:  # never let cleanup mask the real outcome
-            log(f"Account {account_index}: browser close failed: {e}", "WARN")
-        semaphore.release()
-
-
-def _record_thread_result(results, results_lock, account_index: int,
-                          ok: bool, reason):
-    """Append one account lane's outcome to the shared results list."""
-    if results is None:
-        return
-    with results_lock:
-        results.append({
-            "accountIndex": account_index,
-            "ok": ok,
-            "reason": reason,
-        })
+    """Compat wrapper（旧签名）— 实现在 core.orchestrator.run_account_in_thread。"""
+    import sys as _sys
+    from core.orchestrator import ModuleRunner, run_account_in_thread as _core_impl
+    _core_impl(ModuleRunner(_sys.modules[__name__]), account_index, creds, args,
+               semaphore, monitor, budget_gb, initial_estimate_gb,
+               results, results_lock)
 
 
 class RunConfig:
@@ -462,129 +417,17 @@ def run_multi_account(account_indices: list[int], mode: str = "full",
                       per_account_estimate_gb: float = None):
     """Run orchestrator for multiple accounts in parallel threads.
 
-    This is the main entry point called by api.py for multi-account
-    execution. Each account runs in its own thread with its own
-    browser session.
-
-    Args:
-        account_indices: List of account indices (0-based) to process.
-        mode: One of 'full', 'scan_only', 'solve_only'.
-        course: Optional course name filter (substring match).
-        grade_only: "模拟运行" — solve/fill/AI-grade but never submit.
-        content_only: Skip quiz phase, only complete content (仅内容).
-        dry_run: Pure simulation — no submissions, no content completion.
-        resume: Reuse the previously persisted discovery state when present.
-        max_concurrent: Runtime semaphore size (Electron-computed); defaults
-            to config max_concurrent.
-        budget_gb: Project memory budget; None disables the live gate.
-        system_limit_gb: Emergency system-used threshold; enables the monitor.
-        per_account_estimate_gb: Initial per-Chrome estimate.
-
-    Returns:
-        List of thread objects (all completed).
+    多账号并发/内存门/泳道结果机制已上收到 core.orchestrator
+    （run_multi_account_generic）；本模块提供平台钩子（登录/课程处理/
+    会话命名）。测试对 chaoxing.orchestrator.* 的 monkeypatch 经
+    ModuleRunner 的调用时解析依然生效。
     """
-    all_creds = read_all_chaoxing_credentials()
-    if not all_creds:
-        log("No accounts found in passwords/chaoxing.txt", "ERROR")
-        return []
-
-    # Filter credentials by requested indices
-    indices_set = set(account_indices)
-    accounts_to_run = [c for c in all_creds if c["index"] in indices_set]
-    missing = indices_set - {c["index"] for c in accounts_to_run}
-    if missing:
-        log(f"Account indices not found: {sorted(missing)}", "WARN")
-
-    if not accounts_to_run:
-        log("No matching accounts to run", "ERROR")
-        return []
-
-    # Build RunConfig from mode
-    scan_only = mode == "scan_only"
-    solve_only = mode == "solve_only"
-
-    config = RunConfig(
-        course=course,
-        dry_run=dry_run,
-        resume=resume,
-        scan_only=scan_only,
-        quiz_only=solve_only,
-        content_only=content_only,
-        grade_only=grade_only,
-        yes=True,
-    )
-
-    log(f"\nMulti-account mode: {len(accounts_to_run)} account(s) to process")
-    log(f"Mode: {mode}, Course filter: {course or 'none'}")
-    log(f"Spawning {len(accounts_to_run)} parallel thread(s)...")
-
-    SHUTDOWN_FLAG.clear()
-    slots = max(1, int(max_concurrent or get_config().max_concurrent or 1))
-    semaphore = threading.BoundedSemaphore(slots)
-    initial_estimate = float(per_account_estimate_gb or PER_ACCOUNT_INITIAL_GB)
-
-    monitor = None
-    if system_limit_gb:
-        monitor = MemoryMonitor(
-            budget_gb=float(budget_gb) if budget_gb else float(system_limit_gb),
-            system_limit_gb=float(system_limit_gb),
-            initial_estimate_gb=initial_estimate,
-            profile_root=str(CHROME_PROFILES_DIR),
-            on_event=emit_memory,
-            on_emergency=lambda: None,
-        )
-        monitor.start()
-
-    threads = []
-    results: list = []
-    results_lock = threading.Lock()
-    try:
-        for cred in accounts_to_run:
-            t = threading.Thread(
-                target=_run_account_in_thread,
-                args=(cred["index"], cred, config, semaphore, monitor,
-                      budget_gb, initial_estimate, results, results_lock),
-                name=f"chaoxing-account-{cred['index']}",
-                daemon=False,
-            )
-            t.start()
-            threads.append(t)
-            log(f"Started thread for account [{cred['index']}]")
-            human_delay(_THREAD_STAGGER_SECONDS, 0.5)
-
-        try:
-            for t in threads:
-                while t.is_alive():
-                    t.join(timeout=1.0)
-        except KeyboardInterrupt:
-            log("\n[!] Ctrl+C received. Signaling all threads to stop...", "WARN")
-            SHUTDOWN_FLAG.set()
-            for t in threads:
-                t.join(timeout=10.0)
-            log("All threads stopped (or timed out after 10s).")
-    except KeyboardInterrupt:
-        log("\n[!] Ctrl+C received. Signaling all threads to stop...", "WARN")
-        SHUTDOWN_FLAG.set()
-        for t in threads:
-            t.join(timeout=10.0)
-        log("All threads stopped (or timed out after 10s).")
-    finally:
-        if monitor:
-            monitor.stop()
-
-    # A hard account failure (login failure or thread crash) must not be
-    # reported as a successful job. A user stop (SHUTDOWN_FLAG) is not failure.
-    if not SHUTDOWN_FLAG.is_set():
-        failures = [r for r in results if not r["ok"]]
-        if failures:
-            detail = "; ".join(
-                f"account {r['accountIndex']} ({r['reason'] or 'unknown error'})"
-                for r in failures
-            )
-            raise AccountRunError(
-                f"{len(failures)} account(s) failed: {detail}")
-
-    log(f"\n{'='*60}")
-    log(f"Multi-account run complete. {len(threads)} account(s) processed.")
-    log(f"{'='*60}")
-    return threads
+    import sys as _sys
+    from core.orchestrator import ModuleRunner, run_multi_account_generic
+    runner = ModuleRunner(_sys.modules[__name__])
+    return run_multi_account_generic(
+        runner, account_indices, mode=mode, course=course,
+        grade_only=grade_only, content_only=content_only, dry_run=dry_run,
+        resume=resume, max_concurrent=max_concurrent, budget_gb=budget_gb,
+        system_limit_gb=system_limit_gb,
+        per_account_estimate_gb=per_account_estimate_gb)

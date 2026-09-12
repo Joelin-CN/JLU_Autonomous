@@ -101,3 +101,33 @@ def test_api_module_protocol_phases():
     import platforms.zhihuishu.api as zapi
     assert "scan_courses" in zapi.VALID_PHASES
     assert "idle" in zapi.VALID_PHASES
+
+
+class TestStorageStateHelpers:
+    def test_filter_valid_cookies(self):
+        from platforms.zhihuishu.auth import _filter_valid_cookies
+        now = 1000.0
+        cookies = [
+            {"name": "session", "expires": -1},            # 会话 Cookie：保留
+            {"name": "valid", "expires": now + 9999},      # 有效：保留
+            {"name": "expired", "expires": now + 10},      # 60s 内过期：丢弃
+            {"name": "gone", "expires": now - 5},          # 已过期：丢弃
+            {"name": "noexp"},                             # 无 expires 字段：保留
+        ]
+        out = _filter_valid_cookies(cookies, now)
+        assert [c["name"] for c in out] == ["session", "valid", "noexp"]
+
+    def test_login_state_path_under_profile(self, tmp_path, monkeypatch):
+        from core.constants import CHROME_PROFILES_DIR
+        import platforms.zhihuishu.auth as auth
+        monkeypatch.setattr("core.browser.orphans.CHROME_PROFILES_DIR", tmp_path)
+        p = auth.login_state_path(3)
+        assert p == tmp_path / "zhihuishu" / "account-3" / "storage-state.json"
+
+
+class TestVideoBotPolicy:
+    def test_watch_interval_within_policy(self):
+        # D6：轮询节奏 4–7s 人味区间
+        from platforms.zhihuishu.video import _WATCH_INTERVAL
+        lo, hi = _WATCH_INTERVAL
+        assert 3.0 <= lo < hi <= 10.0

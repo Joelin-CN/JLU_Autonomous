@@ -121,7 +121,69 @@ def _save_discovered(account_index: int, courses: list[dict]) -> Path:
     return out
 
 
-def _run_account(account_index: int, mode: str) -> bool:
+
+
+# ── core 编排机钩子（多账号并发/内存门，见 core.orchestrator）────────
+
+SESSION_PREFIX = SESSION_PREFIX           # zhihuishu-chrome（会话/线程命名）
+THREAD_PREFIX = "zhihuishu-account"
+
+
+class RunConfig:
+    """智慧树任务配置（与超星 RunConfig 同构的最小集）。"""
+
+    def __init__(self, *, course=None, dry_run=False, resume=False,
+                 scan_only=False, quiz_only=False, content_only=False,
+                 grade_only=False, yes=True, mode="scan_only"):
+        self.course = course
+        self.dry_run = dry_run
+        self.resume = resume
+        self.scan_only = scan_only
+        self.quiz_only = quiz_only
+        self.content_only = content_only
+        self.grade_only = grade_only
+        self.yes = yes
+        self.mode = mode
+
+
+def config_cls(**kwargs):
+    return RunConfig(**kwargs)
+
+
+def run_account(account_index: int, creds: dict, config) -> bool:
+    return _run_account(account_index, creds, config)
+
+
+def read_credentials():
+    return read_all_zhihuishu_credentials()
+
+
+def close_browser(account_index: int):
+    close_zhihuishu_browser(account_index)
+
+
+def session_name(account_index: int) -> str:
+    return f"{SESSION_PREFIX}-{account_index}"
+
+
+def thread_name(account_index: int) -> str:
+    return f"{THREAD_PREFIX}-{account_index}"
+
+
+def progress(account_index, message, *args, lane_status=None):
+    _emit_progress(None, message, account_index)
+
+
+def max_concurrent_cfg():
+    try:
+        from core.config import get_config
+        return get_config().max_concurrent
+    except Exception:
+        return None
+
+
+def _run_account(account_index: int, creds: dict, config) -> bool:
+    mode = getattr(config, "mode", "scan_only")
     session = f"{SESSION_PREFIX}-{account_index}"
     set_active_session(session)
 
@@ -161,7 +223,28 @@ def _run_account(account_index: int, mode: str) -> bool:
     _emit_progress(95, f"扫描完成：{len(courses)} 门课", account_index)
 
     if mode != "scan_only":
-        core_log("视频/答题处理为 M3/M4 范围，本次仅完成扫描", "WARN")
+        # M3：视频章节自动完成（D6 决策——仅 1.0 倍速真实播放，全程类人操作）
+        from platforms.zhihuishu.video import ZhihuishuVideoBot
+        for i, c in enumerate(courses):
+            if SHUTDOWN_FLAG.is_set():
+                break
+            remaining = len(c.get("remaining_sections", []))
+            if not remaining:
+                continue
+            core_log(f"Account {account_index}：开始视频 {c['name']}"
+                     f"（待看 {remaining} 节，原速真实播放）")
+            _emit_progress(95, f"视频学习：{c['name']}", account_index)
+            ZhihuishuVideoBot(c).run()
+            # 处理完重扫一次进度（复用扫描链路）
+            tree = scan_course_sections(c["recruitId"], c["courseId"])
+            if tree:
+                c["chapters"] = tree["chapters"]
+                c["remaining_sections"] = [
+                    {"chapter": ch["name"], **s}
+                    for ch in c["chapters"] for s in ch["sections"]
+                    if s["kind"] == "video" and not s.get("finished")
+                ]
+        _save_discovered(account_index, courses)
     return True
 
 
@@ -200,23 +283,24 @@ def main() -> None:
     _emit_phase("idle")
     _emit_progress(0, f"Job {cli.job_id} starting -- mode={cli.mode}, accounts={indices}")
     start = time.time()
-    ok_all = True
+    import sys as _sys
+    from core.orchestrator import ModuleRunner, run_multi_account_generic, AccountRunError
     try:
         _emit_phase("login")
-        for idx in indices:
-            ok_all = _run_account(idx, cli.mode) and ok_all
+        run_multi_account_generic(
+            ModuleRunner(_sys.modules[__name__]), indices, mode=cli.mode)
         if SHUTDOWN_FLAG.is_set():
             _emit_phase("stopped")
             _emit_error(f"Job stopped by user after {time.time() - start:.0f}s")
-        elif ok_all:
+        else:
             _emit_phase("completed")
             _emit_progress(100, f"All accounts scanned in {time.time() - start:.0f}s")
             _emit_result({"success": True,
                           "durationMs": int((time.time() - start) * 1000),
                           "accountsProcessed": len(indices), "mode": cli.mode})
-        else:
-            _emit_phase("error")
-            _emit_error("One or more accounts failed (see LOG events)")
+    except AccountRunError as e:
+        _emit_phase("error")
+        _emit_error(str(e))
     except Exception as e:
         _emit_phase("error")
         _emit_error(str(e), stack=traceback.format_exc())

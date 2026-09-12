@@ -133,9 +133,14 @@ def ensure_zhihuishu_browser(account_index: int = 0) -> bool:
     try:
         from core.session import set_active_session
         set_active_session(session)
-        pw_goto(LOGIN_URL)
+        # 登录态恢复优先：有 storageState 就先注入 Cookie 再去课程列表验证，
+        # 有效期内免去扫码（M2 实测：智慧树 Cookie 会话级不落盘，见 D5）。
+        if _restore_login_state(account_index):
+            pw_goto(COURSE_LIST_URL)
+        else:
+            pw_goto(LOGIN_URL)
     except Exception as e:
-        log(f"Navigate to login page failed after open: {e}", "WARN")
+        log(f"Navigate after open failed: {e}", "WARN")
 
     try:
         title_js = ("async (page) => { await page.evaluate(() => "
@@ -146,6 +151,76 @@ def ensure_zhihuishu_browser(account_index: int = 0) -> bool:
         pass
 
     return is_zhihuishu_browser_open(session)
+
+
+# ── 登录态持久化（storageState 导出/恢复）────────────────────────
+
+def login_state_path(account_index: int):
+    """storageState 文件路径（与 profile 同目录，git 忽略）。"""
+    from core.browser.orphans import profile_dir_for_session
+    return profile_dir_for_session(_session_name(account_index),
+                                   account_index) / "storage-state.json"
+
+
+def _filter_valid_cookies(cookies: list, now: float) -> list:
+    """过滤已过期 Cookie（expires==-1 为会话 Cookie，保留）。纯函数供单测。"""
+    out = []
+    for c in cookies:
+        exp = c.get("expires", -1)
+        if exp == -1 or exp > now + 60:
+            out.append(c)
+    return out
+
+
+def export_login_state(account_index: int) -> bool:
+    """登录成功后导出 context.storageState() 到 profile 目录。"""
+    import json as _json
+    js = ("async (page) => { const s = await page.context().storageState();"
+          " return JSON.stringify(s); }")
+    try:
+        raw = _run_js_file(js, timeout=20)
+        data = _json.loads(pw_extract_result(raw) or raw)
+        if isinstance(data, str):
+            data = _json.loads(data)
+        if not isinstance(data, dict) or not data.get("cookies"):
+            log("storageState 导出结果为空，跳过", "WARN")
+            return False
+        path = login_state_path(account_index)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        log(f"登录态已导出（{len(data['cookies'])} cookies）→ {path.name}")
+        return True
+    except Exception as e:
+        log(f"storageState 导出失败：{e}", "WARN")
+        return False
+
+
+def _restore_login_state(account_index: int) -> bool:
+    """若存在 storageState 文件，则把 Cookie 注入当前 context。
+
+    只注入 Cookie（addCookies），不还原 localStorage——智慧树登录态在
+    Cookie 上；注入后由调用方导航到课程列表验证是否仍有效。
+    """
+    import json as _json
+    import time as _time
+    path = login_state_path(account_index)
+    if not path.exists():
+        return False
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+        cookies = _filter_valid_cookies(data.get("cookies", []), _time.time())
+        if not cookies:
+            log("storageState 内无有效 Cookie，忽略", "WARN")
+            return False
+        js = ("async (page) => { await page.context().addCookies("
+              + _json.dumps(cookies, ensure_ascii=False)
+              + "); return 'ok'; }")
+        _run_js_file(js, timeout=20)
+        log(f"已恢复登录态 Cookie（{len(cookies)} 条），验证中...")
+        return True
+    except Exception as e:
+        log(f"storageState 恢复失败：{e}", "WARN")
+        return False
 
 
 def close_zhihuishu_browser(account_index: int = 0) -> bool:
@@ -394,10 +469,14 @@ def zhihuishu_login(account_index: int = 0) -> bool:
 
 
 def ensure_logged_in(account_index: int = 0) -> bool:
-    """Verify or establish login for an account (profile state first)."""
+    """Verify or establish login for an account (state restore → QR → password)."""
     ensure_zhihuishu_browser(account_index)
     if is_logged_in_on_course_list():
-        log(f"Account {account_index} 已登录（profile 复用）")
+        log(f"Account {account_index} 已登录（profile/state 复用）")
         return True
     log(f"Account {account_index} 未登录，开始登录流程...")
-    return zhihuishu_login(account_index)
+    ok = zhihuishu_login(account_index)
+    if ok:
+        # 登录成功即导出 storageState，后续任务在 Cookie 有效期内免扫码
+        export_login_state(account_index)
+    return ok
