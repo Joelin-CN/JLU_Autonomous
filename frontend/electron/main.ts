@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { execFile } from 'child_process'
-import { registerJobHandlers, stopActiveJob } from './ipc/job.handler'
+import { registerJobHandlers, stopAllJobs } from './ipc/job.handler'
 import { registerStatusHandlers } from './ipc/status.handler'
 import { registerCourseHandlers } from './ipc/course.handler'
 import { registerBalanceHandlers } from './ipc/balance.handler'
@@ -87,7 +87,7 @@ function pruneOldLogs(days: number): void {
  * Best-effort cleanup of orphaned Chromium processes that belong to this app.
  * Only targets chrome.exe/chromium.exe whose command line contains the app's
  * data root (the persistent profile path), so unrelated browsers are never
- * force-killed. The playwright-cli session close in stopActiveJob() is the
+ * force-killed. The playwright-cli session close in stopAllJobs() is the
  * primary cleanup; this is a safety net for crashed sessions.
  */
 function cleanupOrphanedChromium(): void {
@@ -218,13 +218,14 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
-  stopActiveJob()
+  // 双平台并行：逐一停止所有平台的活跃任务。
+  stopAllJobs()
   // Clean up orphaned Playwright Chromium processes scoped to this app's data
-  // root (stopActiveJob already closes the sessions gracefully).
+  // root (stopAllJobs already closes the sessions gracefully).
   cleanupOrphanedChromium()
 })
 
 app.on('quit', () => {
   // Final cleanup if any remaining processes
-  stopActiveJob()
+  stopAllJobs()
 })

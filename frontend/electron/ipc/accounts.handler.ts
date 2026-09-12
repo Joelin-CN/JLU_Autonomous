@@ -172,8 +172,13 @@ function runAccountsCommand(
   })
 }
 
-function requireIdle(): void {
-  if (isJobActive()) throw new Error('任务运行中不可修改账号。')
+/**
+ * 账号增删改互斥：只锁「该平台自己的活跃任务」——超星任务运行时仍可维护
+ * 智慧树账号文件，反之亦然（双平台并行语义）。
+ */
+function requireIdle(platform?: unknown): void {
+  const normalized = platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing'
+  if (isJobActive(normalized)) throw new Error('该平台任务运行中不可修改账号。')
 }
 
 export function registerAccountsHandlers(): void {
@@ -190,7 +195,7 @@ export function registerAccountsHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_ADD, async (_e, p) => {
-    requireIdle()
+    requireIdle(p?.platform)
     await runAccountsCommand(['add', '--account', String(p.account),
       '--password', String(p.password),
       ...(p.website ? ['--website', p.website] : [])],
@@ -198,7 +203,7 @@ export function registerAccountsHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_EDIT, async (_e, p) => {
-    requireIdle()
+    requireIdle(p?.platform)
     await runAccountsCommand(['edit', '--index', String(p.index),
       ...(p.password ? ['--password', String(p.password)] : []),
       ...(p.website ? ['--website', p.website] : [])],
@@ -206,7 +211,7 @@ export function registerAccountsHandlers(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_REMOVE, async (_e, p) => {
-    requireIdle()
+    requireIdle(p?.platform)
     await runAccountsCommand(['remove', '--index', String(p.index)],
       p.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing', p.accountsFile)
   })

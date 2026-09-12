@@ -5,8 +5,9 @@ import path from 'path'
 import { PythonBridge } from '../python/pythonBridge'
 import { DATA_DIR } from '../backendPath'
 import { getCurrentSettings } from './status.handler'
-import { setJobActive } from './jobState'
+import { jobSlots, type JobSlot } from './jobSlots'
 import {
+  allocateBudget,
   computeMemoryPlan,
   measureProjectChromeGB,
   measureSystemUsedGB,
@@ -28,8 +29,8 @@ const MAX_RETAINED_JOBS = 20
 
 const jobs = new Map<string, JobStatus>()
 
-let activeJobId: string | null = null
-let bridge: PythonBridge | null = null
+// 活跃任务改由 jobSlots 按平台键控（同平台互斥、跨平台并行）；
+// 这里不再持有全局单例 bridge / activeJobId。
 
 const rateLimitMap = new Map<string, number>()
 
@@ -166,16 +167,14 @@ function selectedControlUnsupported(): never {
 }
 
 /**
- * Clear the global bridge/job state only when the event belongs to the
- * currently active bridge. A previous job's Python process can still emit
- * exit/error events after a new job has been started; without this guard the
- * stale event would null out the new job's bridge and active flag.
+ * Release the platform slot only when the event belongs to the slot's current
+ * bridge. A previous job's Python process can still emit exit/error events
+ * after a new job has started on the same platform; without this guard the
+ * stale event would release the new job's slot.
  */
-function clearActiveJobIfCurrent(current: PythonBridge | null): void {
-  if (!current || bridge !== current) return
-  bridge = null
-  activeJobId = null
-  setJobActive(false)
+function releaseSlotIfCurrent(current: PythonBridge | null): void {
+  if (!current) return
+  jobSlots.releaseIfCurrent(current)
 }
 
 /**
@@ -223,8 +222,9 @@ function closeBrowserSessions(accountIds: number[], platform: Platform = 'chaoxi
 }
 
 function pauseWholeJob(job: JobStatus): void {
-  if (bridge?.isRunning()) {
-    bridge.pause()
+  const slot = jobSlots.getByJobId(job.jobId)
+  if (slot?.bridge.isRunning()) {
+    slot.bridge.pause()
   }
 
   job.status = 'paused'
@@ -238,11 +238,12 @@ function pauseWholeJob(job: JobStatus): void {
 }
 
 function resumeWholeJob(job: JobStatus): void {
-  if (!bridge) {
+  const slot = jobSlots.getByJobId(job.jobId)
+  if (!slot) {
     throw new Error('No active Python process. The job cannot be resumed.')
   }
 
-  bridge.resume()
+  slot.bridge.resume()
   job.status = 'running'
   job.phase = 'idle'
   job.message = 'Job resumed.'
@@ -254,9 +255,9 @@ function resumeWholeJob(job: JobStatus): void {
 }
 
 function stopWholeJob(job: JobStatus): void {
-  const stoppedBridge = bridge
-  if (stoppedBridge?.isRunning()) {
-    stoppedBridge.stop()
+  const slot = jobSlots.getByJobId(job.jobId)
+  if (slot?.bridge.isRunning()) {
+    slot.bridge.stop()
   }
 
   // The visible Chrome is a child of the playwright-cli *daemon*, not of the
@@ -265,7 +266,7 @@ function stopWholeJob(job: JobStatus): void {
   // own finally-block close is best-effort and often skipped when STOP escalates
   // to SIGTERM before a check_signals() checkpoint is reached, so close the
   // sessions here too. Idempotent: closing an already-gone session is a no-op.
-  closeBrowserSessions(job.accountIds)
+  closeBrowserSessions(job.accountIds, job.platform ?? 'chaoxing')
 
   job.status = 'stopped'
   job.phase = 'stopped'
@@ -277,7 +278,7 @@ function stopWholeJob(job: JobStatus): void {
     )
   }
 
-  clearActiveJobIfCurrent(stoppedBridge)
+  if (slot) jobSlots.release(slot.platform)
 }
 
 function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platform): PythonBridge {
@@ -331,11 +332,12 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
       }))
     }
 
-    sendToRenderer(win, IPC_CHANNELS.ON_PROGRESS, event)
+    sendToRenderer(win, IPC_CHANNELS.ON_PROGRESS, { ...event, platform })
   })
 
   currentBridge.on('memory', (event) => {
-    sendToRenderer(win, IPC_CHANNELS.ON_MEMORY, event)
+    // MEMORY 是进程级快照（不带平台）——渲染层按平台分桶显示，转发时统一盖章。
+    sendToRenderer(win, IPC_CHANNELS.ON_MEMORY, { ...event, platform })
   })
 
   currentBridge.on('phase', (event) => {
@@ -364,18 +366,22 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
       currentTask: `Running ${event.phase}`,
     }))
 
-    sendToRenderer(win, IPC_CHANNELS.ON_PHASE_CHANGE, event)
+    sendToRenderer(win, IPC_CHANNELS.ON_PHASE_CHANGE, { ...event, platform })
   })
 
   currentBridge.on('log', (event) => {
-    sendToRenderer(win, IPC_CHANNELS.ON_LOG, event)
+    sendToRenderer(win, IPC_CHANNELS.ON_LOG, { ...event, platform })
   })
 
   currentBridge.on('ticket', (event) => {
     // The NDJSON TICKET event is platform-agnostic; the renderer needs the
     // platform for badges/filtering, so stamp the running job's platform onto
     // the forwarded ticket (protocol shape unchanged — additive field).
-    const stamped = { ...event, ticket: { ...event.ticket, platform } }
+    const stamped = {
+      ...event,
+      platform,
+      ticket: { ...event.ticket, platform },
+    }
     sendToRenderer(win, IPC_CHANNELS.ON_TICKET, stamped)
   })
 
@@ -387,11 +393,10 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
     job.message = event.error
     job.phase = (event.phase as JobStatus['phase']) ?? 'error'
     markTerminalLanes(job, 'error', job.progress)
-    if (bridge === currentBridge) setJobActive(false)
     if (getCurrentSettings().notifications) {
       new Notification({ title: 'JLU 学习助手', body: `任务异常：${event.error}` }).show()
     }
-    sendToRenderer(win, IPC_CHANNELS.ON_ERROR, event)
+    sendToRenderer(win, IPC_CHANNELS.ON_ERROR, { ...event, platform })
   })
 
   currentBridge.on('done', (event) => {
@@ -401,7 +406,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
     // The backend emits ERROR followed by DONE on failure. Once the job is in
     // the error state, DONE must not flip it back to "completed".
     if (job.status === 'error' || job.status === 'stopped') {
-      clearActiveJobIfCurrent(currentBridge)
+      releaseSlotIfCurrent(currentBridge)
       return
     }
 
@@ -417,12 +422,12 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
       new Notification({ title: 'JLU 学习助手', body: '任务已全部完成。' }).show()
     }
 
-    sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, event)
-    clearActiveJobIfCurrent(currentBridge)
+    sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, { ...event, platform })
+    releaseSlotIfCurrent(currentBridge)
   })
 
   currentBridge.on('result', (event) => {
-    sendToRenderer(win, IPC_CHANNELS.ON_RESULT, event)
+    sendToRenderer(win, IPC_CHANNELS.ON_RESULT, { ...event, platform })
   })
 
   currentBridge.on('exit', (code) => {
@@ -439,12 +444,13 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
       sendToRenderer(win, IPC_CHANNELS.ON_ERROR, {
         type: 'ERROR',
         jobId,
+        platform,
         error: job.message,
         phase: 'error',
         recoverable: false,
       })
     }
-    clearActiveJobIfCurrent(currentBridge)
+    releaseSlotIfCurrent(currentBridge)
   })
 
   return currentBridge
@@ -470,15 +476,22 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     } catch {
       baselineGB = (os.totalmem() - os.freemem()) / 1024 ** 3
     }
-    const plan = computeMemoryPlan(totalGB, baselineGB, os.cpus().length,
+    const platform: Platform = payload.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing'
+    const basePlan = computeMemoryPlan(totalGB, baselineGB, os.cpus().length,
       getCurrentSettings().perAccountEstimateGB)
-    if (plan.budgetGB < plan.perAccountEstimateGB) {
-      throw new Error(`内存预算不足以运行一个浏览器实例（预算 ${plan.budgetGB.toFixed(1)}GB）。`)
+    if (basePlan.budgetGB < basePlan.perAccountEstimateGB) {
+      throw new Error(`内存预算不足以运行一个浏览器实例（预算 ${basePlan.budgetGB.toFixed(1)}GB）。`)
     }
 
-    if (activeJobId) {
-      throw new Error(`任务 ${activeJobId} 正在运行，请先停止再启动新任务。`)
+    // 同平台互斥、跨平台并行：另一平台的活跃任务不阻塞本平台启动。
+    const occupant = jobSlots.occupant(platform)
+    if (occupant) {
+      throw new Error(`平台 ${platform} 的任务 ${occupant.jobId} 正在运行，请先停止该任务再启动同平台新任务。`)
     }
+
+    // 双平台并行时的动态剩余分账：本任务预算 = 全局预算 − 其他平台已授予之和
+    // （下限 1 账号；允许受控超卖，实际占用由两进程的全局测量闸门收敛）。
+    const plan = allocateBudget(basePlan, jobSlots.grantedBudgetsExcluding(platform))
 
     const jobId = generateJobId()
     const now = new Date().toISOString()
@@ -492,7 +505,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     const jobStatus: JobStatus = {
       jobId,
       status: 'running',
-      platform: payload.platform ?? 'chaoxing',
+      platform,
       phase: 'idle',
       phaseIndex: 0,
       progress: 0,
@@ -505,8 +518,8 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     }
 
     retainJob(jobId, jobStatus)
-    activeJobId = jobId
-    bridge = createBridgeAndBind(win, jobId, payload.platform ?? 'chaoxing')
+    const jobBridge = createBridgeAndBind(win, jobId, platform)
+    jobSlots.acquire(platform, jobId, jobBridge, plan.budgetGB)
 
     const args: string[] = ['--job-id', jobId, '--accounts', accountIds.join(',')]
     if (mode) {
@@ -530,19 +543,16 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
               '--per-account-estimate-gb', String(plan.perAccountEstimateGB))
 
     try {
-      bridge.start(args, jobId, payload.platform ?? 'chaoxing')
+      jobBridge.start(args, jobId, platform)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       jobStatus.status = 'error'
       jobStatus.phase = 'error'
       jobStatus.message = message
       markTerminalLanes(jobStatus, 'error', 0)
-      activeJobId = null
-      bridge = null
+      jobSlots.release(platform)
       throw new Error(`启动 Python 后端进程失败：${message}`)
     }
-
-    setJobActive(true)
 
     return { jobId }
   })
@@ -596,11 +606,14 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
   })
 
   ipcMain.handle(IPC_CHANNELS.JOB_STATUS, async (_event, jobId?: string) => {
-    // No id → the active job (the common renderer query). A caller asking for
-    // an unknown id gets a Chinese message instead of "Job undefined not found".
-    const target = jobId ?? activeJobId ?? undefined
+    // No id → the sole active job (legacy renderer query; with two platforms
+    // running in parallel a jobId is required). A caller asking for an unknown
+    // id gets a Chinese message instead of "Job undefined not found".
+    const target = jobId ?? jobSlots.soleActiveSlot()?.jobId ?? undefined
     if (!target) {
-      throw new Error('当前没有可查询的任务。')
+      throw new Error(jobSlots.size > 1
+        ? '当前有多个并行任务，查询时需指定 jobId。'
+        : '当前没有可查询的任务。')
     }
     const job = jobs.get(target)
     if (!job) {
@@ -622,11 +635,16 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
       throw new Error('Either an answer or action: "skip" is required.')
     }
 
-    if (!bridge?.isRunning()) {
+    // 双平台并行时按 jobId 路由到对应平台的 bridge；未携带 jobId 的旧载荷
+    // 在恰好只有一个活跃任务时仍可送达（向后兼容）。
+    const slot = (typeof payload.jobId === 'string' && payload.jobId
+      ? jobSlots.getByJobId(payload.jobId)
+      : jobSlots.soleActiveSlot())
+    if (!slot || !slot.bridge.isRunning()) {
       throw new Error('No active Python process. The ticket cannot be resolved.')
     }
 
-    bridge.resolveTicket({
+    slot.bridge.resolveTicket({
       ticketId: payload.ticketId,
       accountId: payload.accountId,
       answer: payload.answer,
@@ -635,28 +653,36 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
   })
 }
 
-export function stopActiveJob(): void {
-  if (!bridge || !bridge.isRunning()) {
-    activeJobId = null
-    bridge = null
+/**
+ * Stop every active platform job during app shutdown (before-quit / quit).
+ * 双平台并行时逐一停止所有槽位；每个槽位沿用原有的 STOP → 定时升级强杀链路。
+ */
+export function stopAllJobs(): void {
+  for (const slot of jobSlots.activeSlots()) {
+    stopSlotDuringQuit(slot)
+  }
+}
+
+function stopSlotDuringQuit(slot: JobSlot): void {
+  const { platform, jobId, bridge } = slot
+  if (!bridge.isRunning()) {
+    jobSlots.release(platform)
     return
   }
 
   bridge.stop()
 
-  // Close the playwright-cli browser sessions for whatever job is active, for
-  // the same reason as stopWholeJob: Chrome is the daemon's child, not Python's.
-  if (activeJobId) {
-    const activeJob = jobs.get(activeJobId)
-    if (activeJob) closeBrowserSessions(activeJob.accountIds)
-  }
+  // Close the playwright-cli browser sessions for this job, for the same
+  // reason as stopWholeJob: Chrome is the daemon's child, not Python's.
+  const job = jobs.get(jobId)
+  if (job) closeBrowserSessions(job.accountIds, job.platform ?? platform)
 
   let elapsedSeconds = 0
   const interval = setInterval(() => {
     elapsedSeconds += 1
-    if (!bridge || !bridge.isRunning() || elapsedSeconds >= 10) {
+    if (!bridge.isRunning() || elapsedSeconds >= 10) {
       clearInterval(interval)
-      if (bridge && bridge.isRunning()) {
+      if (bridge.isRunning()) {
         const pid = (bridge as unknown as { process?: { pid?: number } }).process?.pid
         // taskkill is Windows-only; on other platforms the SIGKILL path in
         // PythonBridge.stop() already covers forced termination.
@@ -668,24 +694,19 @@ export function stopActiveJob(): void {
           }
         }
       }
-      bridge = null
     }
   }, 1000)
 
-  if (activeJobId) {
-    const job = jobs.get(activeJobId)
-    if (job) {
-      job.status = 'stopped'
-      job.phase = 'stopped'
-      job.message = 'Job stopped during app shutdown.'
-      job.finishedAt = new Date().toISOString()
-      if (job.lanes?.length) {
-        job.lanes = job.lanes.map((lane) =>
-          lane.status === 'completed' ? lane : { ...lane, status: 'stopped', currentTask: 'Stopped' },
-        )
-      }
+  if (job) {
+    job.status = 'stopped'
+    job.phase = 'stopped'
+    job.message = 'Job stopped during app shutdown.'
+    job.finishedAt = new Date().toISOString()
+    if (job.lanes?.length) {
+      job.lanes = job.lanes.map((lane) =>
+        lane.status === 'completed' ? lane : { ...lane, status: 'stopped', currentTask: 'Stopped' },
+      )
     }
-    activeJobId = null
   }
-  setJobActive(false)
+  jobSlots.release(platform)
 }

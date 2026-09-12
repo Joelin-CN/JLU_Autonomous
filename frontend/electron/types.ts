@@ -98,6 +98,8 @@ export interface MemoryPlan {
 export interface PythonMemoryEvent {
   type: 'MEMORY'
   jobId?: string
+  /** 主进程转发时按槽位平台注入（后端 MEMORY 事件为进程级快照，不带平台）。 */
+  platform?: Platform
   budgetGB: number
   projectChromeGB: number
   perAccountAvgGB: number
@@ -139,6 +141,8 @@ export interface JobControlPayload {
  * for that account instead. Exactly one of the two is meaningful.
  */
 export interface ResolveTicketPayload {
+  /** 工单所属任务（双平台并行时按它路由到对应 bridge；缺省回落唯一活跃槽）。 */
+  jobId?: string
   ticketId: string
   accountId: number
   answer?: string
@@ -221,6 +225,8 @@ export interface Ticket {
 export interface PythonProgressEvent {
   type: 'PROGRESS'
   jobId: string
+  /** 主进程转发时按槽位平台注入（后端事件本身不携带）。 */
+  platform?: Platform
   percent: number
   message: string
   phase?: string
@@ -232,6 +238,8 @@ export interface PythonProgressEvent {
 export interface PythonLogEvent {
   type: 'LOG'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   level: 'debug' | 'info' | 'warn' | 'error'
   message: string
   timestamp: string
@@ -240,6 +248,8 @@ export interface PythonLogEvent {
 export interface PythonPhaseEvent {
   type: 'PHASE'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   phase: JobPhase
   fromPhase?: JobPhase
   phaseIndex?: number
@@ -254,12 +264,16 @@ export interface PythonTicketEvent {
 export interface PythonResultEvent {
   type: 'RESULT'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   data: unknown
 }
 
 export interface PythonErrorEvent {
   type: 'ERROR'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   error: string
   stack?: string
   phase?: JobPhase
@@ -269,6 +283,8 @@ export interface PythonErrorEvent {
 export interface PythonDoneEvent {
   type: 'DONE'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
 }
 
 export type PythonBridgeEvent =
