@@ -115,6 +115,8 @@ export interface MemoryPlan {
 export interface MemoryEvent {
   type: 'MEMORY'
   jobId?: string
+  /** 主进程转发时按槽位平台注入（后端 MEMORY 事件为进程级快照，不带平台）。 */
+  platform?: Platform
   budgetGB: number
   projectChromeGB: number
   perAccountAvgGB: number
@@ -154,6 +156,8 @@ export interface JobControlPayload {
 
 export interface ProgressEvent {
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   phase: string
   phaseIndex: number
   percent: number
@@ -164,6 +168,8 @@ export interface ProgressEvent {
 
 export interface PhaseChangeEvent {
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   fromPhase: string
   toPhase: string
   phaseIndex: number
@@ -172,6 +178,8 @@ export interface PhaseChangeEvent {
 
 export interface CompletionEvent {
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   success: boolean
   results: {
     totalSections: number
@@ -187,6 +195,8 @@ export interface CompletionEvent {
 
 export interface ErrorEvent {
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   error: string
   phase: string
   recoverable: boolean
@@ -205,6 +215,8 @@ export type TicketKind = 'captcha' | 'qrcode' | 'hint'
 
 export interface Ticket {
   id: string
+  /** 工单所属任务（electron Ticket 自带；双平台并行时按它路由工单答案）。 */
+  jobId?: string
   title: string
   message: string
   severity: TicketSeverity
@@ -312,8 +324,10 @@ export interface AppApi {
   setSettings(settings: Settings): Promise<void>
   getTickets(): Promise<Ticket[]>
   resolveTicket(ticketId: string, resolution: string): Promise<void>
-  /** Send a human's captcha answer (or skip) back to the running backend. */
+  /** Send a human's captcha answer (or skip) back to the running backend.
+   *  jobId 双平台并行时用于路由到对应平台的任务；缺省时后端回落唯一活跃任务。 */
   resolveCaptcha(payload: {
+    jobId?: string
     ticketId: string
     accountId: number
     answer?: string
@@ -329,7 +343,8 @@ export interface AppApi {
   getMemoryPlan(): Promise<MemoryPlan>
   onProgress(cb: (e: ProgressEvent) => void): () => void
   onPhaseChange(cb: (e: PhaseChangeEvent) => void): () => void
-  onLog(cb: (line: { level: string; message: string; timestamp: number }) => void): () => void
+  /** line.jobId/platform 双平台并行时用于把日志归到对应任务（主进程注入）。 */
+  onLog(cb: (line: { jobId: string; platform?: Platform; level: string; message: string; timestamp: number }) => void): () => void
   onTicket(cb: (ticket: Ticket) => void): () => void
   onCompleted(cb: (e: CompletionEvent) => void): () => void
   onError(cb: (e: ErrorEvent) => void): () => void

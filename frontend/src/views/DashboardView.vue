@@ -279,10 +279,9 @@ async function loadBalance(): Promise<void> {
 }
 
 function laneStatus(accountId: string, platform: Platform): string | null {
-  // Lanes belong to the running job's platform only — the other platform's
+  // Lanes belong to that platform's own execution slot — the other platform's
   // dots must not light up as running from stale lane ids.
-  if (executionStore.platform && executionStore.platform !== platform) return null
-  return executionStore.lanes.find((lane) => lane.accountId === accountId)?.status ?? null
+  return executionStore.slotOf(platform).lanes.find((lane) => lane.accountId === accountId)?.status ?? null
 }
 
 function dotStatus(accountId: string, accountStatus: AccountStatus, platform: Platform): string {
@@ -320,10 +319,10 @@ const accountBreakdown = computed(() =>
 )
 
 const runningPlatformLabel = computed(() => {
-  if (!executionStore.isRunning) return '空闲'
-  return executionStore.platform
-    ? `${PLATFORM_META[executionStore.platform].label}任务`
-    : '任务运行中'
+  const running = executionStore.runningPlatforms
+  if (!running.length) return '空闲'
+  if (running.length === 1) return `${PLATFORM_META[running[0]].label}任务`
+  return '双平台并行'
 })
 
 const onlineCount = computed(() =>
@@ -334,7 +333,10 @@ const onlineCount = computed(() =>
 )
 
 const runningCount = computed(() =>
-  executionStore.lanes.filter((lane) => lane.status === 'running').length,
+  executionStore.runningPlatforms.reduce(
+    (sum, p) => sum + executionStore.slotOf(p).lanes.filter((lane) => lane.status === 'running').length,
+    0,
+  ),
 )
 
 /** 完成课程按平台分解（含全部平台分桶；键为 platform:accountId）。 */

@@ -95,6 +95,7 @@ export const useCaptchaStore = defineStore('captcha', () => {
     dismiss(ticketId)
     try {
       await api.resolveCaptcha({
+        jobId: ticket.jobId,
         ticketId,
         accountId: parseAccountId(ticket),
         answer,
@@ -116,6 +117,7 @@ export const useCaptchaStore = defineStore('captcha', () => {
     dismiss(ticketId)
     try {
       await api.resolveCaptcha({
+        jobId: ticket.jobId,
         ticketId,
         accountId: parseAccountId(ticket),
         action: 'skip',

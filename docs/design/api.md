@@ -1,9 +1,18 @@
 # 前后端交互 API 文档 — 超星助手
 
-> **版本**: v1.4
-> **更新**: 2026-08-13
+> **版本**: v1.6
+> **更新**: 2026-09-12
 > **审计**: 多 Agent 并行全代码库审查 + correctness pass 续轮校正
 > **目的**: 定义前端 (Electron + Vue 3) 与后端 (Python/JS 脚本) 之间的完整接口契约，供前后端独立开发和后续仓库融合使用。
+
+> **v1.6 变更**：双平台并行任务执行——`job:start` 互斥从全局改为**同平台互斥、跨平台并行**
+>（每平台一个执行槽位）；spawn 时内存预算改为**动态剩余分账**（独跑全额、后启拿剩余/最低
+> 保障，`--system-limit-gb` 恒为全机值）；`JobStatus` 补 `platform`/`memoryPlan` 字段；
+> `job:resolve-ticket` 载荷新增可选 `jobId`（双任务时按它路由到对应平台进程）；8 个事件通道
+> 主进程转发时统一注入 `platform`（additive，NDJSON 协议本身不变）；智慧树入口补齐
+> `--max-concurrent` 等 4 个内存参数（与超星同构）；`accounts:add/edit/remove` 互斥改为
+> 按平台锁。渲染层 `execution.store` 槽位化（每平台独立 lanes/phases/计时），执行页按平台
+> 分组双 banner 展示。
 
 > **v1.4 变更**：同步 2026-08-13 代码现状（2026-08-22 修订：invoke 通道 28 个）。Pinia Store 9 个、
 > `courses:*` / `accounts:list` 已接真实后端、`--chromium-flags` 已移除、DeepSeek 完全移除
@@ -629,14 +638,14 @@ const IPC_CHANNELS = {
 #### `job:start`
 
 - **方向**: Renderer → Main
-- **请求**: `StartJobPayload { accountIds: number[], courseIds?: string[], mode?: 'full' | 'scan_only' | 'solve_only' }`
+- **请求**: `StartJobPayload { platform?: Platform, accountIds: number[], courseIds?: string[], mode?: 'full' | 'scan_only' | 'solve_only', options?: { dryRun?, focus? } }`
 - **返回**: `{ jobId: string }`
 - **限流**: 500ms 冷却
 - **校验**:
   - `accountIds`: 必填，最多 50 个，必须为正整数（支持 string → parseInt 转换）
-  - **RAM 安全检查**: 启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算最大并发，超预算账号排队分批执行；运行中每 5 秒实测收紧。
-  - **互斥检查**: 同一时间只允许一个活跃任务
-- **行为**: 创建 Job 记录 → 创建 PythonBridge → 绑定事件 → spawn Python 子进程
+  - **RAM 安全检查**: 启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算**全局**计划；另一平台已有活跃任务时按**动态剩余分账**取本任务份额（`allocateBudget`：份额 = clamp(全局预算 − 其他平台已授予之和, 最低保障 1 账号, 全局预算)，`--max-concurrent` 按份额重算，`--system-limit-gb` 恒为全机值——两进程共用同一 fail-closed 急停线，实际占用由两平台进程的全局测量闸门收敛，不超单机预算）。
+  - **互斥检查（v1.6）**: **同平台互斥、跨平台并行**——每平台一个执行槽位（`jobSlots.ts`），`platform` 的槽位被占用时抛 `平台 X 的任务 Y 正在运行…`；另一平台的活跃任务不阻塞启动。
+- **行为**: 创建 Job 记录 → 占用该平台槽位 → 创建 PythonBridge → 绑定事件 → spawn Python 子进程（`python -m platforms.<platform>.api`）；进程退出/完成/停止时释放槽位（`releaseIfCurrent` 防旧进程迟到事件误清新槽位）。
 
 #### `job:pause`
 
@@ -685,6 +694,8 @@ const IPC_CHANNELS = {
 interface JobStatus {
   jobId: string
   status: 'running' | 'paused' | 'completed' | 'stopped' | 'error'
+  /** 本次任务所属平台（job:start 时记录；v1.6 起渲染层直接读它回填 JobHandle.platform）。 */
+  platform?: 'chaoxing' | 'zhihuishu'
   phase: JobPhase
   progress: number           // 0–100
   message?: string
@@ -694,6 +705,8 @@ interface JobStatus {
   courseIds?: string[]
   phaseIndex?: number
   lanes?: JobLaneStatus[]
+  /** 本任务的内存计划（v1.6 双平台并行时为动态剩余分账后的份额）。 */
+  memoryPlan?: MemoryPlan
 }
 
 interface JobLaneStatus {
@@ -711,7 +724,13 @@ type JobPhase =
   | 'completed' | 'paused' | 'stopped' | 'error'
 ```
 
-> `ElectronApiClient.getJobStatus` 会将 `JobStatus` 重整为渲染侧 `JobHandle`：`phases`/`objective`/`strategy`/`createdAt` 取自 `startJob` 时缓存的 `currentHandle`（后端 `JobStatus` 不携带这些字段），`startedAt`/`finishedAt`(→`completedAt`) 由 ISO 字符串解析为 epoch ms。
+> `ElectronApiClient.getJobStatus` 会将 `JobStatus` 重整为渲染侧 `JobHandle`：`phases`/`objective`/`strategy`/`createdAt` 取自 `startJob` 时缓存的 handle（**v1.6 起按 jobId 键控为 Map**，双任务各自持份互不串扰），`platform` 优先读后端 `JobStatus.platform`；`startedAt`/`finishedAt`(→`completedAt`) 由 ISO 字符串解析为 epoch ms。无 `jobId` 调用（旧渲染层兼容路径）在恰有一个活跃任务时返回它，双任务并行时抛 `当前有多个并行任务，查询时需指定 jobId。`
+
+#### `job:resolve-ticket`
+
+- **方向**: Renderer → Main
+- **请求**: `ResolveTicketPayload { jobId?: string, ticketId: string, accountId: number, answer?: string, action?: 'skip' }`
+- **行为（v1.6）**: 携带 `jobId` 时按它路由到对应平台槽位的 PythonBridge；未携带时回落「唯一活跃任务」（双任务并行且无 jobId 时抛错）。`jobId` 仅用于主进程路由，**不透传给 Python**——stdin 上的 `RESOLVE_TICKET` payload 不变（见 §4.2）。
 
 #### `courses:scan`
 
@@ -970,9 +989,9 @@ spawn('python', ['-m', 'chaoxing.api', ...args], {
 })
 ```
 
-**入口**: `python -m chaoxing.api`（后端 repo 提供）
+**入口**: `python -m platforms.<platform>.api`（超星 `platforms.chaoxing.api`、智慧树 `platforms.zhihuishu.api`；双平台并行时各起一个独立子进程，每平台一个执行槽位）
 
-**命令行参数**:
+**命令行参数**（两平台同构；v1.6 起智慧树同样接受全部内存参数——此前智慧树 argparse 未定义会导致 UI 启动直接失败）:
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -1059,6 +1078,11 @@ spawn('python', ['-m', 'chaoxing.api', ...args], {
 ### 4.3 stdout JSON-line 事件协议
 
 Python 子进程通过 stdout 输出 **每行一个 JSON 对象**。主进程逐行解析并分发到对应的事件通道。
+
+> **platform 盖章（v1.6）**: 后端事件本身不携带平台；主进程转发到渲染层时按槽位平台给全部
+> 8 类事件统一注入 `platform` 字段（`{ ...event, platform }`，additive——NDJSON 协议与通道名
+> 不变）。双平台并行时渲染层据此 + `jobId` 把事件路由到对应平台的执行槽位；`MEMORY` 事件
+> 为进程级快照（无账号维度），`platform` 是它分桶显示的唯一依据。
 
 #### `PROGRESS` — 进度更新
 
@@ -1696,3 +1720,10 @@ AttentionQueueView — 使用 3 个 Store: Attention, Campaign, Log
   `最大并发 = min(⌊预算/0.7⌋, cpuCap)`。
 - 运行中：后端每 5 秒采样项目 Chrome 进程树，实测 EWMA 收紧开闸；
   系统总占用逼近上限且项目自身为主因且连续两次不回落时急停。
+- **双平台并行（v1.6）**：spawn 时动态剩余分账——独跑拿全额预算，后启任务拿
+  `clamp(全局预算 − 其他平台已授予, 最低保障 1 账号, 全局预算)`，`--max-concurrent` 按份额
+  重算；「授予额」允许受控超卖，但两平台 Python 进程的内存闸门（`gate_open`）实测的都是
+  全局 Chrome 占用（profile 同根目录），实际内存天然收敛不超单机预算；`--system-limit-gb`
+  恒为全机值，两进程共用同一 fail-closed 急停线。智慧树进程自 v1.6 起接入同一套
+  gate/monitor 钩子（`platforms/zhihuishu/api.py` 挂 `core.memory` 的
+  `MemoryMonitor`/`gate_open`/`measure_project_chrome_gb`）。

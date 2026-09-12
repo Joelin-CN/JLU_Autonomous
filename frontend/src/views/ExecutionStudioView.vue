@@ -1,45 +1,45 @@
 <template>
   <div class="studio">
     <!-- ── Empty State ── -->
-    <div v-if="!executionStore.isRunning && !executionStore.isPaused && !hasRunData" class="empty-state">
+    <div v-if="!anyActivity" class="empty-state">
       <span class="empty-state__icon">▶️</span>
       <p class="empty-state__text">从「课程总览」页面选择账号与课程并启动任务后，这里会显示实时执行进度</p>
     </div>
 
-    <template v-else>
+    <!-- ── Per-platform task groups（双平台并行时各一组，独立控制）── -->
+    <section v-for="slot in visibleSlotList" :key="slot.platform" class="task-group">
       <!-- ── Runtime Banner ── -->
-      <GlassmorphicPanel :class="['banner', `banner--${statusColorKey}`]" padding="16px 22px">
+      <GlassmorphicPanel :class="['banner', `banner--${statusColorKey(slot.status)}`]" padding="16px 22px">
         <div class="banner__left">
-          <span class="banner__icon">{{ statusIcon }}</span>
-          <span class="banner__label">{{ statusText }}</span>
+          <span class="banner__icon">{{ statusIcon(slot.status) }}</span>
+          <span class="banner__label">{{ statusText(slot.status) }}</span>
           <span
-            v-if="jobPlatformMeta"
             class="banner__platform"
-            :style="{ color: jobPlatformMeta.color, borderColor: jobPlatformMeta.color }"
-          >{{ jobPlatformMeta.icon }} {{ jobPlatformMeta.label }}</span>
-          <span v-if="executionStore.isRunning" class="banner__elapsed">{{ executionStore.elapsedFormatted }}</span>
-          <span v-if="executionStore.progress > 0" class="banner__pct">{{ executionStore.progress }}%</span>
+            :style="{ color: metaFor(slot.platform).color, borderColor: metaFor(slot.platform).color }"
+          >{{ metaFor(slot.platform).icon }} {{ metaFor(slot.platform).label }}</span>
+          <span v-if="slot.status === 'running'" class="banner__elapsed">{{ executionStore.elapsedFormattedOf(slot.platform) }}</span>
+          <span v-if="slot.progress > 0" class="banner__pct">{{ Math.round(slot.progress) }}%</span>
         </div>
         <div class="banner__actions">
           <button
-            v-if="executionStore.isRunning"
+            v-if="slot.status === 'running'"
             class="btn btn--gold"
-            @click="executionStore.pauseJob()"
+            @click="executionStore.pauseJob(slot.platform)"
           >全部暂停</button>
           <button
-            v-if="executionStore.isPaused"
+            v-if="slot.status === 'paused'"
             class="btn btn--accent"
-            @click="executionStore.resumeJob()"
+            @click="executionStore.resumeJob(slot.platform)"
           >全部继续</button>
           <button
-            v-if="executionStore.isRunning || executionStore.isPaused"
+            v-if="slot.status === 'running' || slot.status === 'paused'"
             class="btn btn--warn"
-            @click="executionStore.stopJob()"
+            @click="executionStore.stopJob(slot.platform)"
           >全部停止</button>
           <button
-            v-if="isTerminal"
+            v-if="isTerminal(slot.status)"
             class="btn btn--outline"
-            @click="executionStore.reset()"
+            @click="executionStore.reset(slot.platform)"
           >关闭</button>
         </div>
       </GlassmorphicPanel>
@@ -49,7 +49,7 @@
         <h3 class="section-title">执行阶段</h3>
         <div class="timeline">
           <div
-            v-for="(phase, i) in executionStore.phases"
+            v-for="(phase, i) in slot.phases"
             :key="i"
             :class="['timeline-item', `timeline-item--${phase.status}`]"
           >
@@ -81,13 +81,13 @@
         </div>
         <div class="lane-grid">
           <GlassmorphicCard
-            v-for="(lane, i) in executionStore.lanes"
+            v-for="(lane, i) in slot.lanes"
             :key="lane.accountId"
             padding="16px"
             :class="['lane-card', `lane-card--${lane.status}`]"
           >
             <div class="lane-card__head">
-              <span class="lane-card__name">{{ accountName(lane.accountId) }}</span>
+              <span class="lane-card__name">{{ accountName(slot.platform, lane.accountId) }}</span>
               <span class="lane-card__session">S{{ i + 1 }}-{{ lane.accountId.slice(0, 6) }}</span>
             </div>
             <div v-if="lane.currentPhase" class="lane-card__phase">
@@ -95,10 +95,10 @@
               <span class="lane-card__phase-value">{{ lane.currentPhase }}</span>
             </div>
             <div v-if="lane.status === 'running'" class="lane-card__time">
-              ⏱ {{ executionStore.laneElapsedFormatted(lane.accountId) }}
+              ⏱ {{ executionStore.laneElapsedFormatted(slot.platform, lane.accountId) }}
             </div>
             <div v-else-if="lane.status === 'paused'" class="lane-card__time lane-card__time--paused">
-              ⏸ {{ executionStore.laneElapsedFormatted(lane.accountId) }}
+              ⏸ {{ executionStore.laneElapsedFormatted(slot.platform, lane.accountId) }}
             </div>
             <p class="lane-card__task">{{ lane.currentTask ?? '就绪中...' }}</p>
             <div class="lane-card__progress">
@@ -116,28 +116,28 @@
       </GlassmorphicPanel>
 
       <!-- ── Last Run Stats ── -->
-      <GlassmorphicPanel v-if="executionStore.status === 'completed' || executionStore.status === 'stopped' || executionStore.status === 'error'" class="stats" padding="20px">
-        <h3 class="section-title">执行统计</h3>
+      <GlassmorphicPanel v-if="isTerminal(slot.status)" class="stats" padding="20px">
+        <h3 class="section-title">执行统计 · {{ metaFor(slot.platform).label }}</h3>
         <div class="stats-grid">
           <GlassmorphicCard padding="16px" class="stat-card">
-            <span class="stat-card__value">{{ totalCourses }}</span>
+            <span class="stat-card__value">{{ totalCourses(slot) }}</span>
             <span class="stat-card__label">课程</span>
           </GlassmorphicCard>
           <GlassmorphicCard padding="16px" class="stat-card">
-            <span class="stat-card__value">{{ totalSections }}</span>
+            <span class="stat-card__value">{{ totalSections(slot) }}</span>
             <span class="stat-card__label">章节</span>
           </GlassmorphicCard>
           <GlassmorphicCard padding="16px" class="stat-card">
-            <span class="stat-card__value">{{ executionStore.progress }}%</span>
+            <span class="stat-card__value">{{ Math.round(slot.progress) }}%</span>
             <span class="stat-card__label">完成率</span>
           </GlassmorphicCard>
           <GlassmorphicCard padding="16px" class="stat-card">
-            <span class="stat-card__value">{{ executionStore.elapsedFormatted }}</span>
+            <span class="stat-card__value">{{ executionStore.elapsedFormattedOf(slot.platform) }}</span>
             <span class="stat-card__label">耗时</span>
           </GlassmorphicCard>
         </div>
       </GlassmorphicPanel>
-    </template>
+    </section>
   </div>
 </template>
 
@@ -148,47 +148,34 @@ import GlassmorphicCard from '@/shared/ui/GlassmorphicCard.vue'
 import ProgressBar from '@/shared/ui/ProgressBar.vue'
 import Chip from '@/shared/ui/Chip.vue'
 import { useExecutionStore } from '@/app/stores/execution.store'
+import type { ExecutionSlot } from '@/app/stores/execution.store'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useCampaignStore } from '@/app/stores/campaign.store'
 import { PLATFORM_META } from '@/shared/lib/platforms'
+import type { Platform } from '@/shared/lib/types'
 import { maskLogin } from '@/shared/lib/mask'
 
 const executionStore = useExecutionStore()
 const accountStore = useAccountStore()
 const campaignStore = useCampaignStore()
 
-/** 任务平台徽标（startJob 时记录；平台身份在执行期不可切换）。 */
-const jobPlatformMeta = computed(() =>
-  executionStore.platform ? PLATFORM_META[executionStore.platform] : null,
-)
+/** 双平台并行：每个有数据的平台槽渲染一组 banner/阶段/泳道/统计。 */
+const visibleSlotList = computed(() => executionStore.visibleSlots)
+
+const anyActivity = computed(() => visibleSlotList.value.length > 0)
 
 // Reconcile with main-process truth on mount: if a terminal event was missed
 // (e.g. the Python process failed to spawn while this view was not mounted),
 // the banner would otherwise stay "running" forever.
 onMounted(() => {
-  if (executionStore.isRunning) {
-    void executionStore.refreshStatus()
+  for (const platform of executionStore.runningPlatforms) {
+    void executionStore.refreshStatus(platform)
   }
 })
 
-/* ── computed ── */
-const hasRunData = computed(() =>
-  executionStore.phases.length > 0 || executionStore.status !== 'idle',
-)
-
-// A finished run (completed / stopped / error) keeps the studio populated so
-// the user can read the final lanes + stats, but offers a 「关闭」 button to
-// reset back to idle. Without this, a terminal job is un-dismissable and the
-// pause/stop buttons (running-only) are gone — leaving the view stuck.
-const isTerminal = computed(() =>
-  executionStore.status === 'completed' ||
-  executionStore.status === 'stopped' ||
-  executionStore.status === 'error',
-)
-
-/* ── status mapping ── */
-const statusColorKey = computed((): string => {
-  switch (executionStore.status) {
+/* ── status mapping（纯函数：状态字符串 → 展示）── */
+function statusColorKey(status: string): string {
+  switch (status) {
     case 'running': return 'running'
     case 'paused': return 'paused'
     case 'completed': return 'completed'
@@ -196,10 +183,10 @@ const statusColorKey = computed((): string => {
     case 'stopped': return 'stopped'
     default: return 'idle'
   }
-})
+}
 
-const statusIcon = computed((): string => {
-  switch (executionStore.status) {
+function statusIcon(status: string): string {
+  switch (status) {
     case 'running': return '🟢'
     case 'paused': return '⏸️'
     case 'completed': return '✅'
@@ -207,10 +194,10 @@ const statusIcon = computed((): string => {
     case 'stopped': return '⏹️'
     default: return '⏳'
   }
-})
+}
 
-const statusText = computed((): string => {
-  switch (executionStore.status) {
+function statusText(status: string): string {
+  switch (status) {
     case 'idle': return '就绪'
     case 'running': return '运行中'
     case 'paused': return '已暂停'
@@ -219,13 +206,22 @@ const statusText = computed((): string => {
     case 'stopped': return '已停止'
     default: return '未知'
   }
-})
+}
+
+/** A finished run keeps its group populated for reading the final lanes +
+ *  stats, but offers a 「关闭」 button to reset that platform's slot. */
+function isTerminal(status: string): boolean {
+  return status === 'completed' || status === 'stopped' || status === 'error'
+}
+
+function metaFor(platform: Platform) {
+  return PLATFORM_META[platform]
+}
 
 /* ── helpers ── */
-function accountName(accountId: string): string {
+function accountName(platform: Platform, accountId: string): string {
   // Look the login up in the JOB's platform bucket — account ids are
   // per-platform file line numbers and collide across platforms.
-  const platform = executionStore.platform ?? 'chaoxing'
   const acc = accountStore.accountsFor(platform).find(a => a.id === accountId)
   const name = acc?.displayName ?? acc?.username ?? accountId.slice(0, 8)
   return maskLogin(name)
@@ -262,8 +258,13 @@ function laneStatusLabel(status: string): string {
   }
 }
 
-const totalCourses = computed(() => campaignStore.selectedCourseIds.length || executionStore.lanes.length)
-const totalSections = computed(() => executionStore.lanes.reduce((sum, l) => sum + (l.progress > 0 ? Math.floor(l.progress / 10) : 0), 0))
+function totalCourses(slot: ExecutionSlot): number {
+  return campaignStore.selectedCourseIds.length || slot.lanes.length
+}
+
+function totalSections(slot: ExecutionSlot): number {
+  return slot.lanes.reduce((sum, l) => sum + (l.progress > 0 ? Math.floor(l.progress / 10) : 0), 0)
+}
 </script>
 
 <style scoped>
@@ -273,6 +274,19 @@ const totalSections = computed(() => executionStore.lanes.reduce((sum, l) => sum
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+/* ── Per-platform task group ── */
+.task-group {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line);
+}
+.task-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 /* ── Empty ── */

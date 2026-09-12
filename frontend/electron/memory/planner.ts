@@ -38,6 +38,35 @@ export function computeMemoryPlan(
   }
 }
 
+/**
+ * 双平台并行时的动态剩余分账：新任务预算份额 =
+ *   clamp(全局预算 − 其他活跃任务已授予之和, 最低保障 1 账号, 全局预算)。
+ *
+ * 「授予额」允许受控超卖——对方实际占用低于其份额时，本任务仍可启动；两平台
+ * Python 进程的内存闸门（gate_open）实测的都是全局 Chrome 占用（profile 同根
+ * 目录），实际内存天然收敛不超单机预算。systemLimitGB 恒保持全机值：两进程
+ * 共用同一 fail-closed 急停线，任何一方触线都会硬停，红线不破。
+ *
+ * 前置条件：plan 本身已通过「预算 ≥ 单实例估计」检查（见 job.handler job:start），
+ * 因此 clamp 后份额恒 ≥ 1 账号；maxConcurrent 按份额以 computeMemoryPlan 同
+ * 一公式重算。
+ */
+export function allocateBudget(
+  plan: MemoryPlan,
+  grantedToOthers: number[],
+): MemoryPlan {
+  const granted = grantedToOthers.reduce((sum, g) => sum + Math.max(0, g), 0)
+  const est = Math.max(plan.perAccountEstimateGB, 0.1)
+  const shareGB = Math.min(Math.max(plan.budgetGB - granted, est), plan.budgetGB)
+  const memMax = Math.max(1, Math.floor(shareGB / est))
+  return {
+    ...plan,
+    budgetGB: shareGB,
+    memMax,
+    maxConcurrent: Math.max(1, Math.min(memMax, plan.cpuCap)),
+  }
+}
+
 function runPs(script: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(

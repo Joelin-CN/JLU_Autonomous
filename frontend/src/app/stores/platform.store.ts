@@ -45,15 +45,12 @@ export const usePlatformStore = defineStore('platform', () => {
   }
 
   /**
-   * 切换当前平台。返回是否成功（任务运行中拒绝切换）。
+   * 切换当前平台。账号/课程数据按平台分桶缓存，任务也按平台独立槽位运行
+   * （双平台并行），因此任务运行中允许切换 —— 切换的只是 UI 上下文。
    * 编排：清空账号/课程选择 → 重置课程激活账号 → 强制按新平台刷新账号列表。
-   * 账号/课程数据按平台分桶缓存，切回时无需重新拉取课程。
    */
   async function switchPlatform(next: Platform): Promise<boolean> {
     if (next === currentPlatform.value) return true
-
-    const { useExecutionStore } = await import('@/app/stores/execution.store')
-    if (useExecutionStore().isRunning) return false
 
     setPlatform(next)
 

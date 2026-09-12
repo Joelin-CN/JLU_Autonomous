@@ -126,9 +126,12 @@ export const useCourseStore = defineStore('course', () => {
     return request
   }
 
-  async function scanCourses(accountId?: string): Promise<void> {
+  /** platform 缺省 = 当前 UI 平台；任务完成回读时显式传「任务自己的平台」，
+   *  避免双平台并行时把智慧树的发现文件读进超星的桶（反之亦然）。 */
+  async function scanCourses(accountId?: string, platform?: Platform): Promise<void> {
     const targetId = getTargetAccountId(accountId)
-    const key = bucketKey(targetId)
+    const scopedPlatform = platform ?? platformStore.currentPlatform
+    const key = `${scopedPlatform}:${targetId}`
     if (pendingScans.has(key)) {
       return pendingScans.get(key)!
     }
@@ -140,9 +143,9 @@ export const useCourseStore = defineStore('course', () => {
       try {
         const courses = await api.scanCourses(
           targetId && targetId !== 'default' ? [targetId] : undefined,
-          platformStore.currentPlatform,
+          scopedPlatform,
         )
-        setCoursesForAccount(targetId, courses)
+        setCoursesForAccount(targetId, courses, scopedPlatform)
         // scanCourses re-reads the persisted discovery state — a successful
         // read (even when empty) means the account has been scanned already.
         addToSet(scannedAccountIds, key)

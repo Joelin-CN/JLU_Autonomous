@@ -22,13 +22,14 @@
 ```typescript
 // Electron 层入参（ipcClient 在发送时附带 objective/strategy/options，但 handler 仅读取下列字段）
 interface StartJobPayload {
+  platform?: Platform          // 目标平台（默认 chaoxing）——决定后端入口与槽位归属
   accountIds: number[]
   courseIds?: string[]
   mode?: 'full' | 'scan_only' | 'solve_only'
 }
 ```
 
-校验：`accountIds` 非空、≤50、正整数；RAM 安全检查（每账号 ~350MB，≤70% 空闲内存）；单任务互斥；500ms 限流。
+校验：`accountIds` 非空、≤50、正整数；RAM 安全检查（全局预算 = (总内存−基线)×75%，双平台并行时按**动态剩余分账**取本任务份额，`--system-limit-gb` 恒全机值）；**同平台互斥、跨平台并行**（每平台一个执行槽位，见 `ipc/jobSlots.ts`）；500ms 限流。
 
 #### `job:pause` / `job:resume` / `job:stop` — 全局运行控制
 
