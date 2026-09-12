@@ -70,6 +70,8 @@ export interface JobLaneStatus {
 export interface JobStatus {
   jobId: string
   status: 'running' | 'paused' | 'completed' | 'stopped' | 'error'
+  /** 本次任务所属平台（job:start 时记录）。 */
+  platform?: Platform
   phase: JobPhase
   progress: number
   message?: string
@@ -205,6 +207,10 @@ export interface Ticket {
   title: string
   message: string
   imageBase64?: string
+  /** 等待上限（秒）——智慧树扫码登录工单自带；渲染层倒计时优先读它。 */
+  timeoutSeconds?: number
+  /** 主进程转发时按当前任务平台注入（后端 TICKET 事件本身不携带）。 */
+  platform?: Platform
   options?: string[]
   resolved: boolean
   resolution?: string

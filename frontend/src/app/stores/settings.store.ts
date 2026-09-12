@@ -5,14 +5,39 @@ import { DEFAULT_SETTINGS } from '@/shared/lib/constants'
 import { applyTheme } from '@/shared/lib/designTokens'
 import { createApiClient } from '@/shared/lib/apiClient'
 
-const STORAGE_KEY = 'chaoxing-assistant-settings'
+const STORAGE_KEY = 'jlu-study-assistant-settings'
+/** 旧品牌时代的存储 key（v0「超星助手」）。首次读取时一次性迁移后删除。 */
+const LEGACY_STORAGE_KEY = 'chaoxing-assistant-settings'
 const api = createApiClient()
+
+/** 把旧版本持久化结构升级到当前 Settings 形状：
+ *  - accountsFilePath 单值 → accountsFilePaths.chaoxing（多平台分文件）
+ *  导出供单测（settings.migrate.test.ts）。 */
+export function migrateLegacySettings(raw: Record<string, unknown>): Settings {
+  const merged = { ...DEFAULT_SETTINGS, ...raw } as Settings & { accountsFilePath?: string }
+  if (typeof merged.accountsFilePath === 'string' && !merged.accountsFilePaths?.chaoxing) {
+    merged.accountsFilePaths = {
+      ...(merged.accountsFilePaths ?? { chaoxing: '', zhihuishu: '' }),
+      chaoxing: merged.accountsFilePath,
+    }
+  }
+  delete merged.accountsFilePath
+  return merged
+}
 
 function loadFromStorage(): Settings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    let raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+      return migrateLegacySettings(JSON.parse(raw))
+    }
+    // One-time migration from the legacy brand key, then remove it.
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (legacy) {
+      const migrated = migrateLegacySettings(JSON.parse(legacy))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+      return migrated
     }
   } catch {
     // corrupted storage — fall through

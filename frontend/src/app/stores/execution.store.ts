@@ -5,9 +5,11 @@ import type {
   ExecutionStatus,
   JobHandle,
   LogLine,
+  Platform,
   RuntimePhase,
   StartJobPayload,
 } from '@/shared/lib/types'
+import { isInteractiveTicket } from '@/shared/lib/platforms'
 import { createApiClient } from '@/shared/lib/apiClient'
 import { formatDuration } from '@/shared/lib/formatDuration'
 import { useAttentionStore } from '@/app/stores/attention.store'
@@ -21,6 +23,8 @@ const api = createApiClient()
 export const useExecutionStore = defineStore('execution', () => {
   const status = ref<ExecutionStatus>('idle')
   const jobId = ref<string | null>(null)
+  /** 当前任务所属平台（startJob 时记录；执行页徽标用）。 */
+  const platform = ref<Platform | null>(null)
   const phaseIndex = ref(0)
   const lanes = ref<AccountLane[]>([])
   const phases = ref<RuntimePhase[]>([])
@@ -164,11 +168,14 @@ export const useExecutionStore = defineStore('execution', () => {
   }
 
   /**
-   * Backend PHASE events carry a phase NAME (login / scan_courses /
-   * process_sections / solve_quiz / completed) — never an index, and never in
+   * Backend PHASE events carry a phase NAME — never an index, and never in
    * the MODES vocabulary the stepper is built from. Map the name onto a
    * normalized 0..4 rank, scale it to this mode's step count, and advance the
    * stepper. Without this the stepper stays on step 0 forever.
+   *
+   * Phase vocabulary is shared across platforms: zhihuishu emits the subset
+   * idle/login/scan_courses/completed (see platforms/zhihuishu/api.py
+   * VALID_PHASES), chaoxing adds process_sections/solve_quiz mid-run.
    */
   function applyPhaseToSteps(phase: string): void {
     const PHASE_RANK: Record<string, number> = {
@@ -193,6 +200,7 @@ export const useExecutionStore = defineStore('execution', () => {
 
   function mergeHandle(handle: JobHandle): void {
     status.value = handle.status
+    if (handle.platform) platform.value = handle.platform
     phaseIndex.value = handle.phaseIndex
     phases.value = handle.phases
     progress.value = handle.progress
@@ -257,10 +265,10 @@ export const useExecutionStore = defineStore('execution', () => {
 
     eventCleanupFns.push(
       api.onTicket((ticket) => {
-        // Captcha tickets need an interactive modal; everything (including the
-        // captcha's own resolved/timeout follow-up) is also archived in the
-        // attention queue for later review.
-        if (ticket.kind === 'captcha') {
+        // Interactive tickets (captcha input / QR scan / slider hint) need the
+        // modal; everything (including their resolved/timeout follow-ups) is
+        // also archived in the attention queue for later review.
+        if (isInteractiveTicket(ticket)) {
           captchaStore.ingest(ticket)
         }
         attentionStore.upsertTicket(ticket)
@@ -311,6 +319,7 @@ export const useExecutionStore = defineStore('execution', () => {
   async function startJob(payload: StartJobPayload): Promise<void> {
     status.value = 'running'
     error.value = null
+    platform.value = payload.platform ?? 'chaoxing'
     selectedLaneIds.value = new Set()
     activeElapsedBase = 0
     elapsedMs.value = 0
@@ -481,6 +490,7 @@ export const useExecutionStore = defineStore('execution', () => {
     stopAllLaneTimers()
     status.value = 'idle'
     jobId.value = null
+    platform.value = null
     phaseIndex.value = 0
     lanes.value = []
     phases.value = []
@@ -499,6 +509,7 @@ export const useExecutionStore = defineStore('execution', () => {
   return {
     status,
     jobId,
+    platform,
     phaseIndex,
     lanes,
     phases,

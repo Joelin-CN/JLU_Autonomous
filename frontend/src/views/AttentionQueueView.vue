@@ -28,6 +28,19 @@
             variant="default"
             @click="attentionStore.setSeverityFilter('info')"
           >信息</PillButton>
+          <span class="section-header__filter-sep"></span>
+          <PillButton
+            :active="attentionStore.platformFilter === 'all'"
+            variant="default"
+            @click="attentionStore.setPlatformFilter('all')"
+          >全平台</PillButton>
+          <PillButton
+            v-for="p in platformStore.platforms"
+            :key="p"
+            :active="attentionStore.platformFilter === p"
+            variant="default"
+            @click="attentionStore.setPlatformFilter(p)"
+          >{{ platformStore.metaFor(p).shortLabel }}</PillButton>
         </div>
       </div>
 
@@ -41,19 +54,35 @@
           <GlassmorphicCard class="ticket__card" padding="16px 20px">
             <div class="ticket__head">
               <h3 class="ticket__title">{{ ticket.title }}</h3>
+              <span
+                v-if="ticketPlatformMeta(ticket)"
+                class="ticket__platform"
+                :style="{ color: ticketPlatformMeta(ticket)!.color, borderColor: ticketPlatformMeta(ticket)!.color }"
+              >{{ ticketPlatformMeta(ticket)!.shortLabel }}</span>
               <Chip :variant="severityChipVariant(ticket.severity)" size="sm">{{ severityLabel(ticket.severity) }}</Chip>
             </div>
-            <p class="ticket__msg">{{ ticket.message }}</p>
+            <p class="ticket__msg">
+              <template v-for="(part, i) in messageParts(ticket.message)" :key="i">
+                <a v-if="part.url" :href="part.text" target="_blank" rel="noopener noreferrer">{{ part.text }}</a>
+                <template v-else>{{ part.text }}</template>
+              </template>
+            </p>
             <p v-if="ticket.resolution" class="ticket__resolution">{{ ticket.resolution }}</p>
             <div class="ticket__footer">
               <span class="ticket__time">{{ formatTime(ticket.createdAt) }}</span>
-              <!-- Captcha tickets need interactive resolution via the popup
-                   modal, which delivers the answer to the waiting Python
+              <!-- Interactive tickets (captcha input / QR / slider hint) need the
+                   popup modal, which delivers the response to the waiting Python
                    process. The generic 处理完成 button only dismisses the card
-                   locally and would NOT unblock the backend — so for captchas
-                   we show guidance instead of a misleading button. -->
+                   locally and would NOT unblock the backend — so for interactive
+                   kinds we show guidance instead of a misleading button. -->
               <span v-if="ticket.kind === 'captcha' && !ticket.resolved" class="ticket__hint">
                 ⚠ 请在弹窗中输入验证码处理
+              </span>
+              <span v-else-if="ticket.kind === 'qrcode' && !ticket.resolved" class="ticket__hint">
+                ⚠ 请在弹窗中扫码登录，扫码成功后自动继续
+              </span>
+              <span v-else-if="ticket.kind === 'hint' && !ticket.resolved" class="ticket__hint">
+                ⚠ 请按提示在浏览器窗口人工处理
               </span>
               <button
                 v-else-if="!ticket.resolved"
@@ -143,11 +172,14 @@ import ProgressBar from '@/shared/ui/ProgressBar.vue'
 import { useAttentionStore } from '@/app/stores/attention.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import { useLogStore } from '@/app/stores/log.store'
-import type { TicketSeverity } from '@/shared/lib/types'
+import { usePlatformStore } from '@/app/stores/platform.store'
+import { PLATFORM_META } from '@/shared/lib/platforms'
+import type { Ticket, TicketSeverity } from '@/shared/lib/types'
 
 const attentionStore = useAttentionStore()
 const executionStore = useExecutionStore()
 const logStore = useLogStore()
+const platformStore = usePlatformStore()
 
 /* ── computed ── */
 
@@ -195,10 +227,30 @@ const filteredTickets = computed(() => attentionStore.filteredTickets)
 
 /* ── helpers ── */
 
+function ticketPlatformMeta(ticket: Ticket) {
+  return ticket.platform ? PLATFORM_META[ticket.platform] : null
+}
+
+/** Split message text / URL segments so appeal links (e.g. zhihuishu course
+ *  lock warnings) render as clickable anchors without v-html. */
+const URL_PATTERN = /https?:\/\/[^\s）)】\]，,。]+/g
+function messageParts(message: string): Array<{ text: string; url?: boolean }> {
+  const parts: Array<{ text: string; url?: boolean }> = []
+  let last = 0
+  for (const match of message.matchAll(URL_PATTERN)) {
+    const index = match.index ?? 0
+    if (index > last) parts.push({ text: message.slice(last, index) })
+    parts.push({ text: match[0], url: true })
+    last = index + match[0].length
+  }
+  if (last < message.length) parts.push({ text: message.slice(last) })
+  return parts
+}
+
 function severityLabel(s: TicketSeverity): string {
-  if (s === 'critical') return 'Needs Decision'
-  if (s === 'warning') return 'Review'
-  return 'Observe'
+  if (s === 'critical') return '需处理'
+  if (s === 'warning') return '需复核'
+  return '观察'
 }
 
 function severityChipVariant(s: TicketSeverity): 'warn' | 'gold' | 'muted' | 'accent' | 'ok' {
@@ -268,7 +320,14 @@ async function resolveTicket(id: string): Promise<void> {
 }
 .section-header__filters {
   display: flex;
+  align-items: center;
   gap: 6px;
+}
+.section-header__filter-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 4px;
 }
 
 /* ── Tickets ── */
@@ -299,16 +358,31 @@ async function resolveTicket(id: string): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 .ticket__title {
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+.ticket__platform {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
 }
 .ticket__msg {
   font-size: 13px;
   color: var(--muted);
   line-height: 1.4;
+  word-break: break-word;
+}
+.ticket__msg a {
+  color: var(--accent);
 }
 .ticket__resolution {
   font-size: 12px;

@@ -1,19 +1,21 @@
 import type {
   Account,
   AIProvider,
+  AppApi,
   Balance,
-  ChaoxingApi,
   CompletionEvent,
   Course,
   ErrorEvent,
   JobHandle,
   ModeType,
   PhaseChangeEvent,
+  Platform,
   ProgressEvent,
   Settings,
   StartJobPayload,
   SystemResources,
   Ticket,
+  TicketKind,
   MemoryEvent,
   MemoryPlan,
   AiStatus,
@@ -58,9 +60,24 @@ function mapQuizSolver(_solver?: string): AIProvider {
 }
 
 // Maps the Electron-layer Ticket (type/imageBase64/options, ISO timestamps)
-// to the renderer Ticket (severity, ms timestamps). Captcha tickets are
+// to the renderer Ticket (severity, ms timestamps). Interactive tickets are
 // surfaced as 'critical' and carry kind/imageBase64/options through so the
 // interactive captcha modal can render and resolve them.
+//
+// Interactive FORM discrimination is inferred from the field combination the
+// backends already emit (the NDJSON TICKET payload itself carries no form
+// field — the backend can add an explicit one later to remove the heuristic):
+//   - imageBase64 + timeoutSeconds → 'qrcode'  (zhihuishu QR login, auth.py)
+//   - captcha type without image   → 'hint'    (zhihuishu slider: drag in the
+//                                               visible browser window)
+//   - otherwise                    → 'captcha' (chaoxing image + text input)
+export function classifyTicketKind(ticket: any, isCaptchaType: boolean): TicketKind | undefined {
+  if (!isCaptchaType) return undefined
+  if (!ticket.imageBase64) return 'hint'
+  if (typeof ticket.timeoutSeconds === 'number' && ticket.timeoutSeconds > 0) return 'qrcode'
+  return 'captcha'
+}
+
 function mapElectronTicket(ticket: any): Ticket {
   const isCaptcha = ticket.type === 'captcha' || ticket.type === 'verification'
   const severity: Ticket['severity'] = isCaptcha
@@ -81,8 +98,12 @@ function mapElectronTicket(ticket: any): Ticket {
     resolvedAt: ticket.resolvedAt ? new Date(ticket.resolvedAt).getTime() : undefined,
     resolution: ticket.resolution,
     createdAt: new Date(ticket.createdAt).getTime(),
-    kind: isCaptcha ? 'captcha' : undefined,
+    kind: classifyTicketKind(ticket, isCaptcha),
     imageBase64: ticket.imageBase64,
+    timeoutSeconds: typeof ticket.timeoutSeconds === 'number' ? ticket.timeoutSeconds : undefined,
+    // Injected by the Electron main process from the running job's platform
+    // (the backend TICKET event itself is platform-agnostic).
+    platform: ticket.platform === 'zhihuishu' || ticket.platform === 'chaoxing' ? ticket.platform : undefined,
     options: Array.isArray(ticket.options) ? ticket.options : undefined,
   }
 }
@@ -109,15 +130,16 @@ function mapElectronCourse(raw: any): Course {
   }
 }
 
-export class ElectronApiClient implements ChaoxingApi {
+export class ElectronApiClient implements AppApi {
   private cleanupFns: Array<() => void> = []
   private currentHandle: JobHandle | null = null
 
   async startJob(payload: StartJobPayload): Promise<JobHandle> {
     this.dispose()
     const api = requireAPI()
+    const platform: Platform = payload.platform ?? 'chaoxing'
     const result = await api.startJob({
-      platform: payload.platform,
+      platform,
       accountIds: payload.accounts.map((id) => Number.parseInt(id, 10)),
       courseIds: payload.courses,
       mode: mapMode(payload.mode),
@@ -137,6 +159,7 @@ export class ElectronApiClient implements ChaoxingApi {
     this.currentHandle = {
       jobId: result.jobId,
       status: 'running',
+      platform,
       createdAt: Date.now(),
       startedAt: Date.now(),
       objective: payload.objective,
@@ -202,6 +225,8 @@ export class ElectronApiClient implements ChaoxingApi {
     const handle: JobHandle = {
       jobId: raw.jobId,
       status: raw.status,
+      // Backend JobStatus carries no platform; keep the one recorded at start.
+      platform: this.currentHandle?.platform,
       createdAt: this.currentHandle?.createdAt ?? Date.now(),
       startedAt: raw.startedAt ? new Date(raw.startedAt).getTime() : this.currentHandle?.startedAt,
       completedAt: raw.finishedAt ? new Date(raw.finishedAt).getTime() : this.currentHandle?.completedAt,
@@ -228,17 +253,17 @@ export class ElectronApiClient implements ChaoxingApi {
     return handle
   }
 
-  async scanCourses(accountIds?: string[], platform?: 'chaoxing' | 'zhihuishu'): Promise<Course[]> {
+  async scanCourses(accountIds?: string[], platform?: Platform): Promise<Course[]> {
     const raw = await requireAPI().scanCourses({ accountIds: (accountIds ?? []).map((id) => Number.parseInt(id, 10)), platform })
-    return (raw as any[]).map(mapElectronCourse)
+    return (raw as any[]).map((c) => ({ ...mapElectronCourse(c), platform: platform ?? 'chaoxing' }))
   }
 
-  async getCourses(accountId?: string): Promise<Course[]> {
-    const raw = await requireAPI().getCourses(accountId ? Number.parseInt(accountId, 10) : 0)
-    return (raw as any[]).map(mapElectronCourse)
+  async getCourses(accountId?: string, platform?: Platform): Promise<Course[]> {
+    const raw = await requireAPI().getCourses(accountId ? Number.parseInt(accountId, 10) : 0, platform)
+    return (raw as any[]).map((c) => ({ ...mapElectronCourse(c), platform: platform ?? 'chaoxing' }))
   }
 
-  async getAccounts(platform?: 'chaoxing' | 'zhihuishu'): Promise<Account[]> {
+  async getAccounts(platform?: Platform): Promise<Account[]> {
     const raw = await requireAPI().getAccounts(platform)
     return raw.map((account: any) => ({
       id: String(account.id),
@@ -247,6 +272,7 @@ export class ElectronApiClient implements ChaoxingApi {
       website: account.website ?? '',
       status: account.enabled ? 'online' : 'offline',
       avatar: account.avatar,
+      platform: platform ?? 'chaoxing',
     }))
   }
 
@@ -273,7 +299,9 @@ export class ElectronApiClient implements ChaoxingApi {
       debugMode: raw.logLevel === 'debug',
       headless: raw.headless,
       targetAccuracy: raw.targetAccuracy ?? 100,
-      accountsFilePath: raw.accountsFilePath ?? '',
+      // Backend settings carry a single chaoxing-semantics slot; the
+      // zhihuishu path lives only in renderer localStorage.
+      accountsFilePaths: { chaoxing: raw.accountsFilePath ?? '', zhihuishu: '' },
       concurrencyTarget: raw.concurrencyTarget ?? null,
       perAccountEstimateGB: raw.perAccountEstimateGB ?? 0.7,
       pythonPath: raw.pythonPath ?? '',
@@ -292,7 +320,8 @@ export class ElectronApiClient implements ChaoxingApi {
       maxWorkers: settings.maxConcurrency,
       logLevel: settings.debugMode ? 'debug' : 'info',
       headless: settings.headless,
-      accountsFilePath: settings.accountsFilePath,
+      // The backend slot is chaoxing-semantics only (CHAOXING_ACCOUNTS_FILE).
+      accountsFilePath: settings.accountsFilePaths.chaoxing,
       concurrencyTarget: settings.concurrencyTarget,
       perAccountEstimateGB: settings.perAccountEstimateGB,
       pythonPath: settings.pythonPath,
@@ -322,23 +351,23 @@ export class ElectronApiClient implements ChaoxingApi {
     return requireAPI().testAi(provider)
   }
 
-  async addAccount(payload: { account: string; password: string; website?: string }): Promise<void> {
+  async addAccount(payload: { account: string; password: string; website?: string; platform?: Platform; accountsFile?: string }): Promise<void> {
     await requireAPI().addAccount(payload)
   }
 
-  async editAccount(payload: { index: number; password?: string; website?: string }): Promise<void> {
+  async editAccount(payload: { index: number; password?: string; website?: string; platform?: Platform; accountsFile?: string }): Promise<void> {
     await requireAPI().editAccount(payload)
   }
 
-  async removeAccount(index: number): Promise<void> {
-    await requireAPI().removeAccount({ index })
+  async removeAccount(index: number, platform?: Platform, accountsFile?: string): Promise<void> {
+    await requireAPI().removeAccount({ index, platform, accountsFile })
   }
 
   async openFilePicker(): Promise<string | null> {
     return requireAPI().openFilePicker()
   }
 
-  async getAccountsDefaultPath(platform?: 'chaoxing' | 'zhihuishu'): Promise<string> {
+  async getAccountsDefaultPath(platform?: Platform): Promise<string> {
     return requireAPI().getAccountsDefaultPath(platform)
   }
 

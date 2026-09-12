@@ -74,26 +74,42 @@
       </div>
     </GlassmorphicPanel>
 
-    <!-- ── 账号管理 ── -->
+    <!-- ── 账号管理（按平台独立配置；Tab 默认跟随全局平台上下文）── -->
     <GlassmorphicPanel class="panel" padding="22px">
       <h3 class="panel__title">账号管理</h3>
+      <div class="accounts-platform-tabs" role="tablist" aria-label="账号平台">
+        <PillButton
+          v-for="p in platformStore.platforms"
+          :key="p"
+          :active="accountsPlatform === p"
+          variant="default"
+          @click="switchAccountsPlatform(p)"
+        >{{ platformStore.metaFor(p).icon }} {{ platformStore.metaFor(p).label }}</PillButton>
+        <span
+          v-if="!accountCaps.qrLogin"
+          class="accounts-platform-hint"
+        >密码登录；支持自定义学校登录页</span>
+        <span v-else class="accounts-platform-hint">
+          密码登录；任务运行期支持扫码登录（自动弹出二维码）
+        </span>
+      </div>
       <FilePickerField
         v-model="accountsFilePath"
         label="当前账号文件"
         :default-path="defaultAccountsPath"
       />
       <p v-if="accountsError" class="field__error">{{ accountsError }}</p>
-      <div v-if="accountStore.accounts.length" class="creds-table">
+      <div v-if="platformAccounts.length" class="creds-table">
         <div class="creds-row creds-row--head">
           <span class="creds-cell">#</span>
           <span class="creds-cell">账号</span>
-          <span class="creds-cell">登录网址</span>
+          <span v-if="accountCaps.accountWebsiteField" class="creds-cell">登录网址</span>
           <span class="creds-cell">操作</span>
         </div>
-        <div v-for="(acc, i) in accountStore.accounts" :key="acc.id" class="creds-row">
+        <div v-for="(acc, i) in platformAccounts" :key="acc.id" class="creds-row">
           <span class="creds-cell creds-cell--muted">{{ i + 1 }}</span>
-          <span class="creds-cell creds-cell--mono">{{ maskPhone(acc.username) }}</span>
-          <span class="creds-cell creds-cell--muted">{{ websiteLabel(acc.website) }}</span>
+          <span class="creds-cell creds-cell--mono">{{ maskLogin(acc.username) }}</span>
+          <span v-if="accountCaps.accountWebsiteField" class="creds-cell creds-cell--muted">{{ websiteLabel(acc.website) }}</span>
           <span class="creds-cell">
             <button class="btn-link" :disabled="busy" @click="openEdit(acc)">编辑</button>
             <button class="btn-link btn-link--danger" :disabled="busy" @click="askDelete(acc)">
@@ -279,7 +295,8 @@
             <label class="field__label">密码</label>
             <MaskedInput v-model="form.password" placeholder="请输入密码" />
           </div>
-          <div class="field">
+          <!-- 「登录网址」是超星概念（各校登录页不同）；智慧树走固定登录中心 -->
+          <div v-if="accountCaps.accountWebsiteField" class="field">
             <label class="field__label">登录网址（可选）</label>
             <input v-model="form.website" type="text" class="field__input" placeholder="留空使用默认登录页" />
           </div>
@@ -295,7 +312,7 @@
     <ConfirmDialog
       :open="deleting !== null"
       title="删除账号"
-      :message="`确定删除账号 ${deleting ? maskPhone(deleting.username) : ''}？登录档案目录不会被删除。`"
+      :message="`确定删除账号 ${deleting ? maskLogin(deleting.username) : ''}？登录档案目录不会被删除。`"
       @confirm="confirmDelete"
       @cancel="deleting = null"
     />
@@ -342,14 +359,18 @@ import { useAccountStore } from '@/app/stores/account.store'
 import { useMemoryStore } from '@/app/stores/memory.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import { useLogStore } from '@/app/stores/log.store'
+import { usePlatformStore } from '@/app/stores/platform.store'
 import { createApiClient, isMockMode } from '@/shared/lib/apiClient'
-import type { Account } from '@/shared/lib/types'
+import { PLATFORM_CAPABILITIES, PLATFORM_META } from '@/shared/lib/platforms'
+import { maskLogin } from '@/shared/lib/mask'
+import type { Account, Platform } from '@/shared/lib/types'
 
 const settingsStore = useSettingsStore()
 const accountStore = useAccountStore()
 const memoryStore = useMemoryStore()
 const executionStore = useExecutionStore()
 const logStore = useLogStore()
+const platformStore = usePlatformStore()
 const api = createApiClient()
 
 const mockMode = isMockMode()
@@ -372,7 +393,14 @@ const aiTesting = ref(false)
 const aiTestMsg = ref('')
 const aiTestOk = ref(false)
 
-const accountsFilePath = ref(settingsStore.settings.accountsFilePath)
+/** 账号管理面板自己的平台上下文：默认跟随全局平台，可在面板内独立切换
+ *  （设置是管理性质，用户可能要同时维护两平台账号）。 */
+const accountsPlatform = ref<Platform>(platformStore.currentPlatform)
+const accountCaps = computed(() => PLATFORM_CAPABILITIES[accountsPlatform.value])
+/** 面板当前平台的账号（读全局账号 store 的对应分桶）。 */
+const platformAccounts = computed(() => accountStore.accountsFor(accountsPlatform.value))
+
+const accountsFilePath = ref(settingsStore.settings.accountsFilePaths[accountsPlatform.value])
 const accountsError = ref('')
 const defaultAccountsPath = ref('')
 let planTimer: ReturnType<typeof setInterval> | null = null
@@ -409,19 +437,22 @@ async function onPythonPathChange(value: string): Promise<void> {
 const planMax = computed(() => memoryStore.plan?.maxConcurrent ?? 8)
 const concurrencyTarget = computed(() => settingsStore.settings.concurrencyTarget)
 
-watch(accountsFilePath, (val) => {
-  settingsStore.updateSetting('accountsFilePath', val)
-  if (val) logStore.addLog('info', `账号文件已切换：${val}`, '设置')
-  else logStore.addLog('info', '账号文件已恢复默认路径', '设置')
-  reloadAccounts()
-})
+/** 账号面板平台 Tab：切换分桶、默认路径与文件路径标签。 */
+async function switchAccountsPlatform(next: Platform): Promise<void> {
+  if (accountsPlatform.value === next) return
+  accountsPlatform.value = next
+  accountsFilePath.value = settingsStore.settings.accountsFilePaths[next]
+  await reloadAccounts()
+}
 
-watch(() => settingsStore.settings.accountsFilePath, (val) => {
-  // Keep the label in sync when the effective file changes through settings
-  // (e.g. a previously saved override), not only via the file picker.
-  if ((val ?? '') !== accountsFilePath.value) {
-    accountsFilePath.value = val ?? ''
-  }
+watch(accountsFilePath, (val) => {
+  settingsStore.updateSetting(
+    'accountsFilePaths',
+    { ...settingsStore.settings.accountsFilePaths, [accountsPlatform.value]: val },
+  )
+  if (val) logStore.addLog('info', `${PLATFORM_META[accountsPlatform.value].label}账号文件已切换：${val}`, '设置')
+  else logStore.addLog('info', `${PLATFORM_META[accountsPlatform.value].label}账号文件已恢复默认路径`, '设置')
+  reloadAccounts()
 })
 
 watch(() => settingsStore.settings.perAccountEstimateGB, () => {
@@ -434,7 +465,7 @@ onMounted(async () => {
     aiModel.value = aiStatus.value.model
   } catch { /* backend unavailable */ }
   try {
-    defaultAccountsPath.value = await api.getAccountsDefaultPath()
+    defaultAccountsPath.value = await api.getAccountsDefaultPath(accountsPlatform.value)
   } catch { /* backend unavailable */ }
   await memoryStore.refreshPlan()
   planTimer = setInterval(async () => {
@@ -449,31 +480,39 @@ onUnmounted(() => {
 
 async function reloadAccounts(): Promise<void> {
   accountsError.value = ''
+  const platform = accountsPlatform.value
   try {
-    await accountStore.refreshAccounts()
-    // The backend owns the *effective* accounts file (set via settings IPC
-    // or the file picker). Re-read it so the label matches what list/add/edit
-    // actually used, even when the renderer store was not the writer.
-    try {
-      const backend = await api.getSettings()
-      const effective = backend.accountsFilePath ?? ''
-      if (effective !== accountsFilePath.value) {
-        accountsFilePath.value = effective
-        settingsStore.updateSetting('accountsFilePath', effective)
+    // Load (or force-refresh) the panel platform's bucket; the file picker /
+    // add / edit / remove must reflect immediately, so bypass the cache.
+    await accountStore.fetchAccounts(platform, { force: true })
+    // For chaoxing the backend owns the *effective* accounts file (single
+    // settings slot synced via settings IPC) — re-read it so the label
+    // matches what list/add/edit actually used. zhihuishu's path is
+    // renderer-local only.
+    if (platform === 'chaoxing') {
+      try {
+        const backend = await api.getSettings()
+        const effective = backend.accountsFilePaths.chaoxing ?? ''
+        if (effective !== accountsFilePath.value) {
+          accountsFilePath.value = effective
+        }
+      } catch {
+        // backend unavailable — keep the current local value
       }
-    } catch {
-      // backend unavailable — keep the current local value
     }
+    try {
+      defaultAccountsPath.value = await api.getAccountsDefaultPath(platform)
+    } catch { /* keep previous */ }
   } catch (e: any) {
     accountsError.value = e?.message ?? '账号文件解析失败'
   }
 }
 
+/** 「登录网址」列的显示值：平台默认登录页 → 「默认」，否则取 host。 */
 function websiteLabel(website?: string): string {
   if (!website) return '默认'
-  if (website.includes('passport2.chaoxing.com/login') && website.includes('fid=')) {
-    return '默认'
-  }
+  const defaultHost = PLATFORM_META[accountsPlatform.value].defaultLoginHost
+  if (defaultHost && website.includes(defaultHost)) return '默认'
   return website.replace(/^https?:\/\//, '').split('/')[0] || '默认'
 }
 
@@ -530,12 +569,6 @@ async function testAi(): Promise<void> {
   }
 }
 
-function maskPhone(phone: string): string {
-  if (phone.length <= 4) return phone
-  if (phone.length <= 7) return phone.slice(0, 3) + '****'
-  return phone.slice(0, 3) + '****' + phone.slice(-4)
-}
-
 function openAdd(): void {
   editing.value = { id: null }
   form.value = { account: '', password: '', website: '' }
@@ -558,6 +591,7 @@ function askDelete(acc: Account): void {
 
 async function submitAccount(): Promise<void> {
   formError.value = ''
+  const platform = accountsPlatform.value
   try {
     if (editing.value?.id === null) {
       if (!form.value.account.trim() || !form.value.password) {
@@ -567,16 +601,23 @@ async function submitAccount(): Promise<void> {
       await accountStore.addAccount({
         account: form.value.account.trim(),
         password: form.value.password,
-        website: form.value.website.trim() || undefined,
+        // 「登录网址」仅对支持自定义登录页的平台有意义（能力矩阵）。
+        website: accountCaps.value.accountWebsiteField
+          ? (form.value.website.trim() || undefined)
+          : undefined,
+        platform,
       })
-      logStore.addLog('info', '账号已添加。', '设置')
+      logStore.addLog('info', `${PLATFORM_META[platform].label}账号已添加。`, '设置')
     } else if (editing.value) {
       await accountStore.editAccount({
         index: editing.value.id,
         password: form.value.password || undefined,
-        website: form.value.website.trim() || undefined,
+        website: accountCaps.value.accountWebsiteField
+          ? (form.value.website.trim() || undefined)
+          : undefined,
+        platform,
       })
-      logStore.addLog('info', `账号 ${editing.value.id} 已更新。`, '设置')
+      logStore.addLog('info', `${PLATFORM_META[platform].label}账号 ${editing.value.id} 已更新。`, '设置')
     }
     closeEdit()
     await reloadAccounts()
@@ -589,8 +630,8 @@ async function submitAccount(): Promise<void> {
 async function confirmDelete(): Promise<void> {
   if (deleting.value === null) return
   try {
-    await accountStore.removeAccount(Number(deleting.value.id))
-    logStore.addLog('info', `已删除账号 ${maskPhone(deleting.value.username)}。`, '设置')
+    await accountStore.removeAccount(Number(deleting.value.id), accountsPlatform.value)
+    logStore.addLog('info', `已删除账号 ${maskLogin(deleting.value.username)}。`, '设置')
   } catch (e: any) {
     accountsError.value = e?.message ?? '删除失败'
     logStore.addLog('error', `账号删除失败：${e?.message ?? '未知错误'}`, '设置')
@@ -644,6 +685,15 @@ function setConcurrency(value: number): void {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.accounts-platform-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.accounts-platform-hint {
+  font-size: 12px;
+  color: var(--muted);
 }
 .ai-status {
   display: flex;

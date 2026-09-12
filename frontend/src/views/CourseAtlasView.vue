@@ -2,7 +2,12 @@
   <div class="atlas">
     <aside class="atlas__left">
       <div class="left-header">
-        <span class="left-header__title">账号列表</span>
+        <span class="left-header__title">
+          账号列表
+          <span class="left-header__platform" :style="{ color: platformStore.meta.color }">
+            {{ platformStore.meta.icon }} {{ platformStore.meta.shortLabel }}
+          </span>
+        </span>
         <span class="left-header__count">{{ accountStore.selectedAccountIds.size }}/{{ accountStore.accounts.length }}</span>
       </div>
 
@@ -35,7 +40,7 @@
             <span v-if="accountStore.selectedAccountIds.has(account.id)">✓</span>
           </span>
           <StatusDot :status="accountStatusToDot(account.status)" size="sm" />
-          <span class="account-row__phone">{{ maskPhone(account.username) }}</span>
+          <span class="account-row__phone">{{ maskLogin(account.username) }}</span>
           <span
             class="account-row__badge"
             :class="{ 'account-row__badge--sel': selectedCourseCountForAccount(account.id) > 0 }"
@@ -53,22 +58,16 @@
       <div v-if="extraAccountCount > 0" class="extra-hint">更多账号... (+{{ extraAccountCount }})</div>
 
       <div class="left-actions">
-      <div class="platform-switch" role="tablist" aria-label="平台切换">
-        <button
-          v-for="opt in platformOptions"
-          :key="opt.value"
-          class="platform-switch__btn"
-          :class="{ 'platform-switch__btn--active': platform === opt.value }"
-          :disabled="executionStore.isRunning"
-          @click="switchPlatform(opt.value)"
-        >{{ opt.label }}</button>
-      </div>
-
         <button class="btn btn--outline btn--block" :disabled="noAccountSelected || executionStore.isRunning" @click="scanClicked">
           {{ executionStore.isRunning ? '运行中...' : '一键扫描' }}
         </button>
-        <button class="btn btn--primary btn--block" :disabled="noAccountSelected" @click="startFullAuto">
-          一键全自动
+        <button
+          class="btn btn--primary btn--block"
+          :disabled="noAccountSelected || executionStore.isRunning"
+          :title="fullAutoHint"
+          @click="startFullAuto"
+        >
+          {{ fullAutoLabel }}
         </button>
       </div>
     </aside>
@@ -146,8 +145,19 @@
             <button class="btn btn--primary" :disabled="executionStore.isRunning" @click="startJob('full-auto')">
               按队列启动 {{ accountStore.selectedAccountIds.size }} 个账号 · 最多 {{ planMax }} 并发
             </button>
-            <button class="btn btn--outline" :disabled="executionStore.isRunning" @click="startJob('batch-exec', { focus: 'quiz' })">仅刷题</button>
-            <button class="btn btn--outline" :disabled="executionStore.isRunning" @click="startJob('batch-exec', { focus: 'content' })">仅内容</button>
+            <!-- 任务模式按平台能力矩阵显隐/置灰（shared/lib/platforms.ts） -->
+            <button
+              class="btn btn--outline"
+              :disabled="executionStore.isRunning || !caps.tasks.solveOnly"
+              :title="caps.tasks.solveOnlyHint"
+              @click="startJob('batch-exec', { focus: 'quiz' })"
+            >仅刷题</button>
+            <button
+              class="btn btn--outline"
+              :disabled="executionStore.isRunning || !caps.tasks.contentOnly"
+              :title="caps.tasks.contentOnlyHint"
+              @click="startJob('batch-exec', { focus: 'content' })"
+            >仅内容</button>
           </div>
         </GlassmorphicCard>
       </footer>
@@ -163,10 +173,12 @@ import StatusDot from '@/shared/ui/StatusDot.vue'
 import ProgressBar from '@/shared/ui/ProgressBar.vue'
 import Chip from '@/shared/ui/Chip.vue'
 import Toggle from '@/shared/ui/Toggle.vue'
+import { maskLogin } from '@/shared/lib/mask'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useCampaignStore } from '@/app/stores/campaign.store'
 import { useCourseStore } from '@/app/stores/course.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
+import { usePlatformStore } from '@/app/stores/platform.store'
 import { useSettingsStore } from '@/app/stores/settings.store'
 import { useMemoryStore } from '@/app/stores/memory.store'
 import type { AccountStatus, Course, ModeType, StartJobPayload } from '@/shared/lib/types'
@@ -177,19 +189,10 @@ const campaignStore = useCampaignStore()
 const courseStore = useCourseStore()
 const executionStore = useExecutionStore()
 
-/** 当前平台（影响账号文件/课程数据/任务后端入口）。 */
-const platform = ref<'chaoxing' | 'zhihuishu'>('chaoxing')
-const platformOptions = [
-  { value: 'chaoxing' as const, label: '超星学习通' },
-  { value: 'zhihuishu' as const, label: '智慧树' },
-]
-async function switchPlatform(next: 'chaoxing' | 'zhihuishu'): Promise<void> {
-  if (platform.value === next || executionStore.isRunning) return
-  platform.value = next
-  accountStore.deselectAll()
-  courseStore.deselectAllCourses()
-  await accountStore.fetchAccounts(next)
-}
+/** 全局平台上下文（侧栏切换器驱动；本页不再持有局部平台状态）。 */
+const platformStore = usePlatformStore()
+const caps = computed(() => platformStore.capabilities)
+
 const settingsStore = useSettingsStore()
 const memoryStore = useMemoryStore()
 
@@ -202,11 +205,15 @@ const dryRun = computed({
 })
 const planMax = computed(() => memoryStore.plan?.maxConcurrent ?? settingsStore.settings.concurrencyTarget ?? 8)
 
-function maskPhone(phone: string): string {
-  if (phone.length <= 4) return phone
-  if (phone.length <= 7) return `${phone.slice(0, 3)}****`
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
-}
+/** 「全自动」按钮按平台能力矩阵取文案/说明（智慧树 full = 视频任务）。 */
+const fullAutoLabel = computed(
+  () => caps.value.tasks.fullAutoLabel ?? '一键全自动',
+)
+const fullAutoHint = computed(() =>
+  platformStore.currentPlatform === 'zhihuishu'
+    ? '智慧树当前以 1.0 倍速真实播放视频任务（D6 决策）'
+    : '全自动完成课程学习与答题',
+)
 
 function accountStatusToDot(status: AccountStatus): 'online' | 'offline' | 'running' | 'idle' | 'error' | 'done' {
   if (status === 'online') return 'online'
@@ -239,12 +246,12 @@ const extraAccountCount = computed(() => {
 const activeAccountLabel = computed(() => {
   if (!activeAccountId.value) return '请选择一个账号'
   const account = accountStore.accounts.find((item) => item.id === activeAccountId.value)
-  return account ? maskPhone(account.username) : '请选择一个账号'
+  return account ? maskLogin(account.username) : '请选择一个账号'
 })
 
 const activeCourses = computed(() => {
   if (!activeAccountId.value) return []
-  return courseStore.coursesByAccount[activeAccountId.value] ?? []
+  return courseStore.coursesForAccount(activeAccountId.value)
 })
 
 /** True while the displayed account has an executing lane — course-card
@@ -267,12 +274,13 @@ const unscannedSelectedAccounts = computed(() =>
 )
 
 function courseCountForAccount(accountId: string): number {
-  return (courseStore.coursesByAccount[accountId] ?? []).length
+  return courseStore.coursesForAccount(accountId).length
 }
 
 function selectedCourseCountForAccount(accountId: string): number {
-  const courses = courseStore.coursesByAccount[accountId] ?? []
-  return courses.filter((course) => courseStore.selectedCourseIds.has(course.id)).length
+  return courseStore
+    .coursesForAccount(accountId)
+    .filter((course) => courseStore.selectedCourseIds.has(course.id)).length
 }
 
 function syncCampaignSelection(): void {
@@ -328,7 +336,7 @@ async function startJob(
   accountOverride?: string[],
 ): Promise<void> {
   const payload: StartJobPayload = {
-    platform: platform.value,
+    platform: platformStore.currentPlatform,
     objective: 'catchup',
     strategy: 'balanced',
     mode,
@@ -352,10 +360,14 @@ async function scanUnscannedOnly(): Promise<void> {
 watch(
   () => courseStore.selectedCourseIds,
   (selectedIds) => {
-    for (const [accountId, courses] of Object.entries(courseStore.coursesByAccount)) {
-      const hasSelectedCourse = courses.some((course) => selectedIds.has(course.id))
-      if (hasSelectedCourse && !accountStore.selectedAccountIds.has(accountId)) {
-        accountStore.selectAccount(accountId)
+    // Auto-select any account (current platform's buckets only) that owns one
+    // of the selected courses so the job payload stays consistent.
+    for (const account of accountStore.accounts) {
+      const hasSelectedCourse = courseStore
+        .coursesForAccount(account.id)
+        .some((course) => selectedIds.has(course.id))
+      if (hasSelectedCourse && !accountStore.selectedAccountIds.has(account.id)) {
+        accountStore.selectAccount(account.id)
       }
     }
     syncCampaignSelection()
@@ -365,6 +377,21 @@ watch(
 watch(
   () => accountStore.selectedAccountIds,
   () => {
+    syncCampaignSelection()
+  },
+)
+
+/** 平台切换后：激活新平台的第一个账号并预取课程（数据已按平台分桶）。 */
+watch(
+  () => platformStore.currentPlatform,
+  async () => {
+    activeAccountId.value = null
+    if (accountStore.accounts.length > 0) {
+      setActiveAccount(accountStore.accounts[0].id)
+    }
+    for (const account of accountStore.accounts) {
+      void courseStore.fetchCourses(account.id)
+    }
     syncCampaignSelection()
   },
 )
@@ -415,6 +442,11 @@ onMounted(async () => {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--muted);
+}
+.left-header__platform {
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 6px;
 }
 
 .checkbox {
@@ -694,32 +726,5 @@ onMounted(async () => {
   .course-grid {
     grid-template-columns: 1fr;
   }
-}
-</style>
-
-<style scoped>
-.platform-switch {
-  display: inline-flex;
-  gap: 0;
-  border: 1px solid var(--color-border, #d0d5dd);
-  border-radius: 8px;
-  overflow: hidden;
-  margin-right: 12px;
-}
-.platform-switch__btn {
-  padding: 6px 14px;
-  font-size: 13px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: var(--color-text-secondary, #667085);
-}
-.platform-switch__btn--active {
-  background: var(--color-primary, #2563eb);
-  color: #fff;
-}
-.platform-switch__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 </style>

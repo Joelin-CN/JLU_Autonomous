@@ -12,6 +12,11 @@
         <div class="banner__left">
           <span class="banner__icon">{{ statusIcon }}</span>
           <span class="banner__label">{{ statusText }}</span>
+          <span
+            v-if="jobPlatformMeta"
+            class="banner__platform"
+            :style="{ color: jobPlatformMeta.color, borderColor: jobPlatformMeta.color }"
+          >{{ jobPlatformMeta.icon }} {{ jobPlatformMeta.label }}</span>
           <span v-if="executionStore.isRunning" class="banner__elapsed">{{ executionStore.elapsedFormatted }}</span>
           <span v-if="executionStore.progress > 0" class="banner__pct">{{ executionStore.progress }}%</span>
         </div>
@@ -145,11 +150,17 @@ import Chip from '@/shared/ui/Chip.vue'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useCampaignStore } from '@/app/stores/campaign.store'
+import { PLATFORM_META } from '@/shared/lib/platforms'
 import { maskLogin } from '@/shared/lib/mask'
 
 const executionStore = useExecutionStore()
 const accountStore = useAccountStore()
 const campaignStore = useCampaignStore()
+
+/** 任务平台徽标（startJob 时记录；平台身份在执行期不可切换）。 */
+const jobPlatformMeta = computed(() =>
+  executionStore.platform ? PLATFORM_META[executionStore.platform] : null,
+)
 
 // Reconcile with main-process truth on mount: if a terminal event was missed
 // (e.g. the Python process failed to spawn while this view was not mounted),
@@ -212,9 +223,11 @@ const statusText = computed((): string => {
 
 /* ── helpers ── */
 function accountName(accountId: string): string {
-  const acc = accountStore.accounts.find(a => a.id === accountId)
+  // Look the login up in the JOB's platform bucket — account ids are
+  // per-platform file line numbers and collide across platforms.
+  const platform = executionStore.platform ?? 'chaoxing'
+  const acc = accountStore.accountsFor(platform).find(a => a.id === accountId)
   const name = acc?.displayName ?? acc?.username ?? accountId.slice(0, 8)
-  // Logins are phone numbers — mask them like every other view does.
   return maskLogin(name)
 }
 
@@ -302,6 +315,16 @@ const totalSections = computed(() => executionStore.lanes.reduce((sum, l) => sum
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--muted);
+}
+.banner__platform {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
 }
 .banner__pct {
   font-family: var(--font-mono);

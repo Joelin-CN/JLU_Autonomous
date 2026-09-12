@@ -1,23 +1,34 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Ticket } from '@/shared/lib/types'
+import { isInteractiveTicket } from '@/shared/lib/platforms'
 import { createApiClient } from '@/shared/lib/apiClient'
 
 const api = createApiClient()
 
-/** Backend hard timeout for manual captcha entry (handlers.py: 10 minutes). */
+/** Backend hard timeout for manual captcha entry (handlers.py: 10 minutes).
+ *  Tickets that carry their own timeoutSeconds (e.g. zhihuishu QR login)
+ *  override this per-ticket — see ticketTimeoutMs(). */
 export const CAPTCHA_TIMEOUT_MS = 10 * 60 * 1000
 
+/** Per-ticket wait limit: ticket.timeoutSeconds when present, else the default. */
+export function ticketTimeoutMs(ticket: Pick<Ticket, 'timeoutSeconds'>): number {
+  const seconds = ticket.timeoutSeconds
+  if (typeof seconds === 'number' && seconds > 0) return seconds * 1000
+  return CAPTCHA_TIMEOUT_MS
+}
+
 /**
- * Holds captcha tickets that need a human to read the screenshot and type an
- * answer. Tickets are shown one at a time (FIFO) by CaptchaModal; resolving or
- * skipping the current one advances to the next.
+ * Holds interactive tickets (captcha input / QR scan / slider hint) that need a
+ * human in the loop. Tickets are shown one at a time (FIFO) by CaptchaModal;
+ * resolving or skipping the current one advances to the next.
  *
  * The backend blocks the affected account's browser session while it waits for
- * the answer (max 10 min), so this is a real-time interrupt, not a passive list.
+ * the answer (or the QR scan / manual slider drag), so this is a real-time
+ * interrupt, not a passive list.
  */
 export const useCaptchaStore = defineStore('captcha', () => {
-  /** Pending captcha tickets, oldest first. The head is shown in the modal. */
+  /** Pending interactive tickets, oldest first. The head is shown in the modal. */
   const queue = ref<Ticket[]>([])
   const error = ref<string | null>(null)
 
@@ -32,7 +43,7 @@ export const useCaptchaStore = defineStore('captcha', () => {
 
   /** Ingest a ticket coming off the onTicket stream. */
   function ingest(ticket: Ticket): void {
-    if (ticket.kind !== 'captcha') return
+    if (!isInteractiveTicket(ticket)) return
 
     // A resolved/timeout ticket carries the same id as the original — drop it
     // from the queue (the backend has stopped waiting; the modal must close).
@@ -71,7 +82,7 @@ export const useCaptchaStore = defineStore('captcha', () => {
     return id
   }
 
-  /** Submit the typed answer for a ticket, then optimistically advance. */
+  /** Submit the typed answer for an input-kind ticket, then optimistically advance. */
   async function submitAnswer(ticketId: string, answer: string): Promise<void> {
     const ticket = queue.value.find((t) => t.id === ticketId)
     if (!ticket) return
@@ -94,7 +105,8 @@ export const useCaptchaStore = defineStore('captcha', () => {
     }
   }
 
-  /** Skip the current course for this account instead of answering. */
+  /** Skip the current course for this account instead of answering
+   *  (input) / abort waiting (qrcode / hint). */
   async function skip(ticketId: string): Promise<void> {
     const ticket = queue.value.find((t) => t.id === ticketId)
     if (!ticket) return

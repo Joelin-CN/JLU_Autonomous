@@ -1,8 +1,8 @@
 {
-  "name": "chaoxing-assistant",
+  "name": "jlu-study-assistant",
   "version": "1.0.0",
   "private": true,
-  "description": "Chaoxing Assistant frontend built with Vue, Vite, and Electron IPC adapters.",
+  "description": "JLU 学习助手 frontend built with Vue, Vite, and Electron IPC adapters.",
   "scripts": {
     "dev": "vite",
     "dev:electron": "vite --mode electron",
