@@ -2,6 +2,12 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12（续三）— M3 视频全链路实测通过（0.1 节 456/456s，全程无人值守）
+
+- **实测结论（全部 DOM+视觉双确认）**：storageState 零扫码二次验证；章节树滚动加载 38 节点；**三种弹窗自动化**（学前必读=右上角X带重试、课程提醒=下次再说每轮清扫、弹题=试选→.answer 揭示→选正确→进度入账）；播放启动=真实点击 .videoArea（.bigPlayButton 需 hover 且悬停态跨 CLI 命令不保持，实测换路径）；**0.1 节 456/456s 原速完整播放**（.time_icofinish 标记），途中自动处理 2 弹题 + 2 课程提醒。
+- **关键修复**：fixed 定位弹窗可见性判定（offsetParent 恒 null 致三类弹窗漏检，统一 rect+computedStyle）；播放/恢复点击改 .videoArea；观看循环每轮通用弹窗清扫。
+- 回归 632 passed。
+
 ## 2026-09-12（续二）— M3 前置：storageState 登录态 / core 编排机上收 / 视频处理器（D6 原速策略）
 
 - **storageState 登录态闭环（D5 对策）**：登录成功导出 `chrome-profiles/zhihuishu/account-N/storage-state.json`，任务启动注入 Cookie——实测第二轮**零扫码**（75 cookies 恢复→直接登录，34s 完成扫描 vs 首轮扫码 105s）。

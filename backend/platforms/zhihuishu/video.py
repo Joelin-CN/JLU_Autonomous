@@ -44,22 +44,32 @@ def _run_json(js: str, timeout: int = 20):
 
 
 def _read_video_state() -> dict:
-    """只读探测播放器与页面状态（不驱动任何媒体）。"""
+    """只读探测播放器与页面状态（不驱动任何媒体）。
+
+    可见性判定必须 fixed-aware：弹题层 .dialog-test 与锁课 mask 都是
+    fixed 定位，offsetParent 恒为 null，不能用 offsetParent 判可见。
+    """
     js = """
 async (page) => {
   const r = await page.evaluate(() => {
+    const visible = el => {
+      if (!el) return false;
+      const cs = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && rect.width > 0;
+    };
     const v = document.querySelector('video');
-    const dialog = document.querySelector('.el-dialog__wrapper:not([style*="display: none"]), .el-dialog');
-    const dialogVisible = dialog && dialog.offsetParent !== null;
+    const dlg = document.querySelector('.el-dialog__wrapper.dialog-test')
+             || document.querySelector('.el-dialog');
     const lock = document.querySelector('.video-study .dialog .mask');
-    const lockVisible = lock && getComputedStyle(lock).opacity !== '0' && lock.offsetWidth > 0;
     return JSON.stringify({
       hasVideo: !!v,
       paused: v ? v.paused : null,
       currentTime: v ? v.currentTime : null,
       duration: v ? v.duration : null,
       ended: v ? v.ended : null,
-      dialogVisible, lockVisible,
+      dialogVisible: visible(dlg),
+      lockVisible: visible(lock),
       url: location.href,
     });
   });
@@ -81,6 +91,97 @@ def _click(selector: str, what: str) -> bool:
     except Exception as e:
         log(f"点击 {what}（{selector}）失败：{e}", "WARN")
         return False
+
+
+def _dismiss_blocking_dialogs() -> bool:
+    """清扫阻挡播放的非答题弹窗（学前必读 / 课程提醒）。
+
+    实测：这两种弹窗会在进入学习页与播放中途反复出现（"下次再说"仅
+    当次有效）；不清扫会拦截一切对播放区的点击。返回是否清扫了弹窗。
+    """
+    cleared = False
+    # 课程提醒（dialog-warn）：点「下次再说」
+    warn_js = """
+async (page) => {
+  const r = await page.evaluate(() => {
+    const el = document.querySelector('.el-dialog__wrapper.dialog-warn');
+    if (!el) return JSON.stringify({visible: false});
+    const cs = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return JSON.stringify({visible: cs.display !== 'none' && rect.width > 0});
+  });
+  return r;
+}
+"""
+    try:
+        if _run_json(warn_js, timeout=10).get("visible"):
+            log("检测到「课程提醒」弹窗，点「下次再说」...")
+            _click(".dialog-warn .talk-later-btn", "课程提醒-下次再说")
+            human_delay(1.0, 0.2)
+            cleared = True
+    except Exception:
+        pass
+
+    # 学前必读（dialog-read）：点右上角 X（含重试验证）
+    if _dismiss_pre_study_dialog():
+        cleared = True
+    return cleared
+
+
+def _dismiss_pre_study_dialog() -> bool:
+    """关掉「学前必读」弹窗（关闭方式是右上角 X，需重试验证）。"""
+    probe = """
+async (page) => {
+  const r = await page.evaluate(() => {
+    const el = document.querySelector('.preschool-Mustread-div');
+    if (!el) return JSON.stringify({visible: false});
+    const cs = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const visible = cs.display !== 'none' && cs.visibility !== 'hidden'
+                    && rect.height > 0;
+    return JSON.stringify({visible});
+  });
+  return r;
+}
+"""
+
+    def _dialog_visible() -> bool:
+        try:
+            return bool(_run_json(probe, timeout=10).get("visible"))
+        except Exception:
+            return False
+
+    if not _dialog_visible():
+        return False
+    log("检测到「学前必读」弹窗，点击右上角关闭...")
+    for attempt in range(3):
+        _click(".dialog-read .iconguanbi", f"学前必读-关闭X(第{attempt + 1}次)")
+        human_delay(1.2, 0.2)
+        if not _dialog_visible():
+            log("「学前必读」弹窗已关闭")
+            return True
+    log("「学前必读」弹窗多次关闭失败", "WARN")
+    return False
+
+
+def _ensure_muted() -> None:
+    """静音（仅当当前有声时点击；音量钮是切换型控件，盲点会开声）。"""
+    probe = """
+async (page) => {
+  const r = await page.evaluate(() => {
+    const box = document.querySelector('.volumeBox');
+    return JSON.stringify({muted: !!((box && box.className) || '').includes('volumeNone')});
+  });
+  return r;
+}
+"""
+    try:
+        st = _run_json(probe, timeout=10)
+        if st.get("muted"):
+            return
+    except Exception:
+        pass
+    _click(".volumeBox .volumeIcon", "静音")
 
 
 def scroll_load_chapter_tree(max_rounds: int = 20) -> int:
@@ -117,46 +218,66 @@ async (page) => {
 
 
 def _handle_popup_quiz() -> bool:
-    """弹题：试选→读 .answer span→改选→关闭（纯真实点击）。"""
-    state_js = """
+    """弹题处理（2026-09-12 全链路实测验证）。
+
+    链路：试选第一项 → 页面在 .answer 揭示「正确答案：B」→ 按字母点
+    对应项（结构实测为 [A文, A母, B文, B母, ...] 交替，字母 L 的文本项
+    在 nth=L*2）→ 关闭 footer 按钮。全部真实点击；答题后由调用方恢复播放。
+    """
+    probe = """
 async (page) => {
   const r = await page.evaluate(() => {
-    const dlg = document.querySelector('.el-dialog__wrapper.dialog-test') || document.querySelector('.el-dialog');
-    if (!dlg) return JSON.stringify({has: false});
-    const opts = [...dlg.querySelectorAll('.topic-option-item, .topic-item')];
-    const answer = (dlg.querySelector('.answer span') || {}).innerText || '';
-    return JSON.stringify({has: true, optCount: opts.length, answer: answer.trim()});
+    const dlg = document.querySelector('.el-dialog__wrapper.dialog-test')
+             || document.querySelector('.el-dialog');
+    const visible = el => {
+      if (!el) return false;
+      const cs = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && rect.width > 0;
+    };
+    if (!visible(dlg)) return JSON.stringify({has: false});
+    const title = (dlg.querySelector('.title-tit, .topic-title') || {}).innerText || '';
+    const answer = (dlg.querySelector('.answer') || {}).innerText || '';
+    const optCount = dlg.querySelectorAll('.topic-list .topic-item, .topic-option-item').length;
+    return JSON.stringify({has: true, title: title.trim().slice(0, 40), answer: answer.trim(), optCount});
   });
   return r;
 }
 """
     try:
-        st = _run_json(state_js, timeout=15)
+        st = _run_json(probe, timeout=15)
     except Exception:
         return False
     if not st.get("has"):
         return False
-    log(f"检测到弹题（{st.get('optCount')} 选项，答案提示：{st.get('answer', '')[:20]}）")
-    # 试点第一项触发答案揭示
-    _click(".el-dialog .topic-option-item, .el-dialog .topic-item", "弹题选项(试选)")
-    human_delay(1.0, 0.2)
+    log(f"检测到弹题：{st.get('title', '')[:30]}（{st.get('optCount', 0)} 节点）")
+
+    # 1) 试选第一项（触发答案揭示）
+    _click(".dialog-test .topic-list .topic-item >> nth=0", "弹题试选")
+    human_delay(1.2, 0.2)
+
+    # 2) 读答案（如「正确答案：B」或「正确答案：A,C」）
     try:
-        st2 = _run_json(state_js, timeout=15)
-        answer = st2.get("answer", "")
+        st2 = _run_json(probe, timeout=15)
+        raw = st2.get("answer", "")
     except Exception:
-        answer = ""
-    # 有答案提示则按字母映射改选（A→0, B→1 …，多选逗号分隔）
-    if answer:
-        for ch in [c.strip().upper() for c in answer.replace("，", ",").split(",") if c.strip()]:
-            if ch and "A" <= ch <= "Z":
-                idx = ord(ch) - ord("A")
-                _click(f".el-dialog .topic-option-item:nth-of-type({idx + 1}), "
-                       f".el-dialog .topic-item:nth-of-type({idx + 1})",
-                       f"弹题正确项{ch}")
-                human_delay(0.6, 0.15)
-    # 关闭弹题（footer 按钮或确定）
-    _click(".el-dialog__footer .btn, .el-dialog .btn", "弹题关闭")
-    human_delay(1.0, 0.2)
+        raw = ""
+    import re
+    m = re.search(r"正确答案[：:]\s*([A-Z,，\s]+)", raw)
+    letters = [c for c in (m.group(1) if m else "") if "A" <= c <= "Z"]
+    log(f"弹题答案揭示：{raw[:20] or '未揭示'} → 选 {letters or '保持试选'}")
+
+    # 3) 按字母点击对应文本项（nth = 字母序*2）
+    for letter in letters or []:
+        nth = (ord(letter) - ord("A")) * 2
+        _click(f".dialog-test .topic-list .topic-item >> nth={nth}",
+               f"弹题选项{letter}")
+        human_delay(0.7, 0.15)
+
+    # 4) 关闭弹题
+    human_delay(0.8, 0.15)
+    _click(".dialog-test .el-dialog__footer .btn", "弹题关闭")
+    human_delay(1.2, 0.2)
     return True
 
 
@@ -241,16 +362,17 @@ async (page) => {
             _click(f"text={sec['name']}", f"小节 {sec['num']}")
             human_delay(2.0, 0.4)
 
-        # 2. 关掉可能的课程提醒弹窗
-        _click(".dialog-warn .talk-later-btn", "课程提醒(下次再说)")
+        # 2. 清扫阻挡弹窗（学前必读 / 课程提醒，播放中途也会再弹）
+        _dismiss_blocking_dialogs()
         human_delay(0.5, 0.1)
 
         # 3. 静音（站点自身音量控件的真实点击；类人且降低环境干扰）
-        _click(".volumeBox .volumeIcon", "静音")
+        _ensure_muted()
         human_delay(0.4, 0.1)
 
-        # 4. 点大播放按钮开始（暂停态可见）
-        _click(".bigPlayButton", "播放")
+        # 4. 直接点击视频画面开始播放（实测：.bigPlayButton 需 hover 才渲染，
+        #    且 CLI 单命令模式下悬停态跨命令不保持；videoArea 单击即切换）
+        _click(".videoArea", "播放(点击画面)")
 
         # 5. 观看循环：只读轮询 + 真实点击恢复
         self._watch_loop(sec)
@@ -271,6 +393,7 @@ async (page) => {
             if st.get("dialogVisible"):
                 _handle_popup_quiz()
                 human_delay(1.0, 0.2)
+                _click(".videoArea", "弹题后恢复播放")
                 continue
 
             if not st.get("hasVideo"):
@@ -287,6 +410,10 @@ async (page) => {
                 log(f"  本节完成（{cur:.0f}/{dur:.0f}s）")
                 return
 
+            if _dismiss_blocking_dialogs():
+                stalled = 0
+                continue
+
             if st.get("paused"):
                 # 未到结尾却暂停：可能被站点防挂机暂停，真实点击恢复
                 stalled += 1
@@ -294,7 +421,7 @@ async (page) => {
                     log("多次恢复播放无效，跳过本节", "WARN")
                     return
                 human_delay(1.5, 0.5)
-                _click(".bigPlayButton", "恢复播放")
+                _click(".videoArea", "恢复播放(点击画面)")
                 continue
 
             if cur <= last_t + 0.1 and not st.get("paused"):
