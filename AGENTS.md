@@ -8,10 +8,10 @@
 
 ## 项目概况
 
-- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 已支持；智慧树 🚧 规划中（见 `docs/roadmap/zhihuishu.md`）。项目范围仅此两个平台。
+- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 全套；智慧树 🚧 建设中（登录/课程扫描 ✅、视频 ✅、答题 M4 与滑块自动求解进行中，见 `docs/roadmap/zhihuishu.md`）。项目范围仅此两个平台。
 - `frontend/`（Electron + Vue 3）与 `backend/`（Python 3.10+，Playwright 浏览器自动化 + AI 答题）在同一仓库。
 - 前端按 Electron 进程划分：`electron/`（主进程）/ `src/`（渲染进程，Vue 3 + Pinia）/ `src/shared/`（共享层）。
-- 后端 Python 包为 `backend/chaoxing/`（入口 `python -m chaoxing.api`，JSON-line 协议与 Electron 通信）。
+- 后端按平台分包（M1 多平台架构）：`backend/core/`（平台无关层）+ `backend/platforms/{chaoxing,zhihuishu}/`（平台实现，入口 `python -m platforms.<platform>.api`，JSON-line 协议与 Electron 通信）+ `backend/chaoxing/`（兼容垫片，旧入口 `python -m chaoxing.api` 语义不变）。
 - 运行时数据统一放仓库根 `data/`（不入库），第三方参考放 `references/`（不入库）。
 - 仓库为公开仓库，由双管理者（@Joelin-CN / @Arthur-Pendrag0n）异步维护；协作流程见 `CONTRIBUTING.md`，目录与文件规范见 `docs/standards/`。
 
@@ -36,7 +36,9 @@ JLU_Autonomous/
 │   └── electron-builder.yml  # 打包配置（extraResources 白名单）
 │
 ├── backend/                  # Python 后端
-│   ├── chaoxing/             # 核心包：api / orchestrator / platform / solvers / ai / browser
+│   ├── core/                 # 平台无关层：orchestrator / engine / browser / memory / ai / credentials
+│   ├── platforms/            # 平台实现：chaoxing/（全套）+ zhihuishu/（登录/扫描/视频，M4 进行中）
+│   ├── chaoxing/             # 兼容垫片：sys.modules 别名 + -m 入口转发（旧命令语义不变）
 │   ├── scripts/              # CLI shim 与只读 JS 资产
 │   ├── tests/                # pytest 测试（unit / integration / e2e）
 │   ├── chaoxing_cli.ps1/.bat # PowerShell / CMD 交互式 CLI
@@ -44,8 +46,8 @@ JLU_Autonomous/
 │   └── requirements.txt
 │
 ├── data/                     # 运行时数据（git 忽略，仅 README 入库）
-│   ├── passwords/            # 凭证（chaoxing.txt / doubao.txt / volc_billing.txt）
-│   ├── chrome-profiles/      # 浏览器持久化档案（登录态）
+│   ├── passwords/            # 凭证（chaoxing.txt / zhihuishu.txt / doubao.txt / volc_billing.txt）
+│   ├── chrome-profiles/      # 浏览器持久化档案（超星平铺 / 智慧树 zhihuishu/account-N/ 含 storageState）
 │   ├── screenshots/ output/ temp/ logs/ documents/
 │
 ├── references/               # 第三方参考（git 忽略，仅 README 入库）
@@ -135,5 +137,5 @@ JLU_Autonomous/
 
 ---
 
-**文档版本**: 0.2（迁移至 JLU_Autonomous，更新协作模式与规范索引）
+**文档版本**: 0.3（backend 目录树与入口更新为 core/ + platforms/ 多平台布局；智慧树实况同步）
 **创建日期**: 2026-08-07　**最近更新**: 2026-09-07

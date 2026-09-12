@@ -22,11 +22,17 @@
 ```typescript
 // Electron 层入参（ipcClient 在发送时附带 objective/strategy/options，但 handler 仅读取下列字段）
 interface StartJobPayload {
+  platform?: 'chaoxing' | 'zhihuishu'   // 目标平台，缺省 'chaoxing'。决定后端入口
+                                        // python -m platforms.<platform>.api 与凭据文件
   accountIds: number[]
   courseIds?: string[]
   mode?: 'full' | 'scan_only' | 'solve_only'
 }
 ```
+
+平台路由（M1 多平台架构）：`platform='zhihuishu'` 时主进程注入 `ZHIHUISHU_ACCOUNTS_FILE`（默认
+`data/passwords/zhihuishu.txt`）与可选 `ZHIHUISHU_HEADED`；浏览器会话 `{platform}-chrome-{N}` 与档案目录
+`chrome-profiles/<platform>/account-N/` 按平台隔离。NDJSON stdout 事件协议两平台一致（无 breaking change）。
 
 校验：`accountIds` 非空、≤50、正整数；RAM 安全检查（每账号 ~350MB，≤70% 空闲内存）；单任务互斥；500ms 限流。
 
@@ -91,9 +97,11 @@ type JobPhase =
 #### `courses:scan` — 扫描课程
 
 ```
-请求: ScanCoursesPayload { accountIds: number[], courseIds?: string[] }
+请求: ScanCoursesPayload { accountIds: number[], courseIds?: string[], platform?: 'chaoxing' | 'zhihuishu' }
 响应: Course[]
 ```
+
+`platform` 缺省 `chaoxing` —— spawn `python -m platforms.<platform>.courses --account N` 按平台读取发现文件；zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`。
 
 #### `courses:list` — 获取账号课程列表
 
@@ -254,8 +262,8 @@ interface Ticket {
 |------|------|------|
 | `balance:query` | 无 | `Balance`（火山引擎现金余额） |
 | `ai:status` / `ai:set` / `ai:test` | `{ apiKey?, model }` | AI 配置状态 / 保存 / 连通性测试 |
-| `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷 | void（原子写当前账号文件） |
-| `accounts:default-path` | 无 | 默认账号文件绝对路径 |
+| `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷 | void（原子写当前账号文件；主进程 `runAccountsCommand` 已支持 platform 路由，preload 暂未暴露） |
+| `accounts:default-path` | `{ platform? }`（handler 支持；preload 暂无参调用） | 对应平台默认账号文件绝对路径（`passwords/<platform>.txt`） |
 | `dialog:open-file` | 无 | 文件选择器结果（账号文件） |
 | `system:resources` | 无 | RAM / CPU / 运行时长（Node `os` 采样） |
 | `memory:plan` | 无 | 按当前机器状态计算的并发计划 |
