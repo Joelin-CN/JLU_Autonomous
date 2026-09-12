@@ -189,7 +189,9 @@ export function registerAccountsHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_LIST, async (_e, p?: { platform?: Platform; accountsFile?: string }) => {
     const platform: Platform = p?.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing'
-    const parsed = await runAccountsCommand([], platform, p?.accountsFile)
+    // 显式传 list 子命令：超星无参时默认 list，但智慧树 argparse 的 command
+    // 必填——空参会 exit 2（真实模式下智慧树账号列表一直拉不到的根因）。
+    const parsed = await runAccountsCommand(['list'], platform, p?.accountsFile)
     if (parsed.type !== 'ACCOUNTS') throw new Error('账号列表返回异常。')
     return parsed.accounts.map(toAccount)
   })

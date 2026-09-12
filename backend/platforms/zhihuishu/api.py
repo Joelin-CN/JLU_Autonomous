@@ -93,6 +93,9 @@ def _protocol_handler(event: dict) -> None:
     elif et == "TICKET":
         if isinstance(event.get("ticket"), dict):
             _write_json_line({"type": "TICKET", "ticket": event["ticket"]})
+    elif et == "MEMORY":
+        # core.memory.MemoryMonitor 的快照（预算仪表数据源）；缺此分支会被静默丢弃
+        _write_json_line(event)
 
 
 def _start_stdin_controller() -> threading.Thread:
@@ -257,6 +260,9 @@ def main() -> None:
     global _job_id
     parser = argparse.ArgumentParser(
         description="Zhihuishu Backend API -- JSON-line protocol (M2: login + scan)")
+    parser.add_argument("--job-id", type=str, required=True)
+    parser.add_argument("--accounts", type=str, required=True,
+                        help="Comma-separated account indices")
     parser.add_argument("--mode", type=str, default="scan_only",
                         choices=["scan_only", "full", "solve_only"])
     parser.add_argument(
