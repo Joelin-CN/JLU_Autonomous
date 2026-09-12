@@ -232,7 +232,9 @@ interface Ticket {
   type: 'captcha' | 'verification' | 'warning' | 'error'
   title: string
   message: string
-  imageBase64?: string
+  imageBase64?: string        // 验证码截图 / 扫码登录二维码
+  timeoutSeconds?: number     // 等待上限（秒）——智慧树扫码登录工单自带
+  platform?: Platform         // 主进程转发时按当前任务平台注入
   options?: string[]
   resolved: boolean
   resolution?: string
@@ -240,6 +242,8 @@ interface Ticket {
   resolvedAt?: string
 }
 ```
+
+> 渲染层按字段组合判别交互形态（扫码型 / 提示型 / 输入型），见 `shared/lib/ipcClient.ts` 的 `classifyTicketKind`。
 
 #### `tickets:resolve` — 解决工单
 
@@ -254,8 +258,8 @@ interface Ticket {
 |------|------|------|
 | `balance:query` | 无 | `Balance`（火山引擎现金余额） |
 | `ai:status` / `ai:set` / `ai:test` | `{ apiKey?, model }` | AI 配置状态 / 保存 / 连通性测试 |
-| `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷 | void（原子写当前账号文件） |
-| `accounts:default-path` | 无 | 默认账号文件绝对路径 |
+| `accounts:add` / `accounts:edit` / `accounts:remove` | 账号载荷（含可选 `platform` / `accountsFile`） | void（原子写对应平台账号文件） |
+| `accounts:default-path` | `{ platform? }` | 对应平台默认账号文件绝对路径（`passwords/<platform>.txt`） |
 | `dialog:open-file` | 无 | 文件选择器结果（账号文件） |
 | `system:resources` | 无 | RAM / CPU / 运行时长（Node `os` 采样） |
 | `memory:plan` | 无 | 按当前机器状态计算的并发计划 |
