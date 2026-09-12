@@ -22,6 +22,11 @@ from core.logging_setup import (
     set_protocol_handler, signal_pause, signal_resume, signal_stop,
     log as core_log,
 )
+# 内存治理钩子：作为模块属性被 core.orchestrator.ModuleRunner 惰性读取
+from core.memory import (
+    MemoryMonitor, gate_open, measure_project_chrome_gb,
+    PER_ACCOUNT_INITIAL_GB,
+)
 from core.session import set_active_session
 
 from platforms.zhihuishu.auth import (
@@ -252,16 +257,31 @@ def main() -> None:
     global _job_id
     parser = argparse.ArgumentParser(
         description="Zhihuishu Backend API -- JSON-line protocol (M2: login + scan)")
-    parser.add_argument("--job-id", type=str, required=True)
-    parser.add_argument("--accounts", type=str, required=True,
-                        help="Comma-separated account indices")
     parser.add_argument("--mode", type=str, default="scan_only",
                         choices=["scan_only", "full", "solve_only"])
+    parser.add_argument(
+        "--max-concurrent", type=int, default=None,
+        help="Runtime size of the account semaphore (Electron computes this "
+             "from the memory/CPU plan; CLI runs fall back to config).")
+    parser.add_argument(
+        "--budget-gb", type=float, default=None,
+        help="Project memory budget in GB (Electron-computed).")
+    parser.add_argument(
+        "--system-limit-gb", type=float, default=None,
+        help="Absolute system-used-RAM emergency threshold in GB "
+             "(baseline + budget + margin, Electron-computed).")
+    parser.add_argument(
+        "--per-account-estimate-gb", type=float, default=None,
+        help="Initial per-Chrome memory estimate in GB (default 0.7).")
     cli = parser.parse_args()
 
     _job_id = cli.job_id
     stdin_thread = _start_stdin_controller()
     set_protocol_handler(_protocol_handler)
+
+    if cli.system_limit_gb:
+        from core.logging_setup import set_ram_limit_gb
+        set_ram_limit_gb(float(cli.system_limit_gb))
 
     indices = sorted({int(s) for s in cli.accounts.split(",") if s.strip().isdigit()})
     if not indices:
@@ -288,7 +308,10 @@ def main() -> None:
     try:
         _emit_phase("login")
         run_multi_account_generic(
-            ModuleRunner(_sys.modules[__name__]), indices, mode=cli.mode)
+            ModuleRunner(_sys.modules[__name__]), indices, mode=cli.mode,
+            max_concurrent=cli.max_concurrent, budget_gb=cli.budget_gb,
+            system_limit_gb=cli.system_limit_gb,
+            per_account_estimate_gb=cli.per_account_estimate_gb)
         if SHUTDOWN_FLAG.is_set():
             _emit_phase("stopped")
             _emit_error(f"Job stopped by user after {time.time() - start:.0f}s")
