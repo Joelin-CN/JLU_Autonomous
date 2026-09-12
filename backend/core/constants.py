@@ -12,11 +12,14 @@ import threading
 from pathlib import Path
 
 # ── Force UTF-8 on Windows ────────────────────────────────────
+# 用原地 reconfigure 而不是新建 TextIOWrapper：新 wrapper 会持有并最终
+# 关闭底层 buffer（GC 时机不定），曾导致 pytest 捕获/报告阶段静默崩溃。
 if sys.platform == "win32":
-    if sys.stdout.buffer is not None:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    if sys.stderr.buffer is not None:
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError, ValueError):
+            pass  # pytest 替换后的流可能不支持 reconfigure——保持原样
 
 # ── Paths ──────────────────────────────────────────────────────
 WORKSPACE = Path(os.environ.get("CHAOXING_WORKSPACE", str(Path(__file__).parent.parent)))

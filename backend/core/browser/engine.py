@@ -157,18 +157,17 @@ def _headed_env_enabled() -> bool:
 
 
 def _pw_once(cli: str, session: str, args, t: int, use_shell: bool) -> str:
-    """Single playwright-cli invocation (the pre-retry body of pw())."""
-    # Headed mode: env-driven (CHAOXING_HEADED legacy / {PLATFORM}_HEADED).
-    # Only append --headed for actions that accept it (not snapshot/run-code)
-    _headed_actions = {"open", "click", "fill", "press", "goto", "type", "hover", "select-option", "check", "uncheck", "drag"}
-    _action = args[0] if args else ""
-    _want_headed = _headed_env_enabled() and _action in _headed_actions
-    headed_flag = " --headed" if _want_headed else ""
+    """Single playwright-cli invocation (the pre-retry body of pw()).
 
+    Headed 模式只在 ``open`` 子命令生效（``open --headed``）；其他子命令
+    不接受 --headed——历史版本曾把 --headed 当全局前缀注入，导致
+    CHAOXING_HEADED/ZHIHUISHU_HEADED 开启时所有 click/fill 全部失败
+    （"Unknown option: --headed"），已移除。
+    """
     if use_shell:
         # Build command string with shell-safe quoting
         quoted = [_quote_arg(a) for a in args]
-        cmd_str = f"{cli}{headed_flag} -s={session} " + " ".join(quoted)
+        cmd_str = f"{cli} -s={session} " + " ".join(quoted)
         result = subprocess.run(
             cmd_str,
             cwd=str(WORKSPACE),
@@ -182,7 +181,7 @@ def _pw_once(cli: str, session: str, args, t: int, use_shell: bool) -> str:
     else:
         # Use list form (shell=False) to avoid pipe buffer deadlock
         # on Windows for long-running commands
-        cmd = [cli] + (["--headed"] if headed_flag else []) + [f"-s={session}"] + list(args)
+        cmd = [cli, f"-s={session}"] + list(args)
         result = subprocess.run(
             cmd,
             cwd=str(WORKSPACE),
