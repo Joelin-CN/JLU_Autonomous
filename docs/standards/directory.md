@@ -30,23 +30,28 @@
 5. **是仓库级配置吗**（CI / 模板 / git 配置） → `.github/` 或仓库根。
 6. 都不是 → 先在 PR 里说明理由，不要新建顶层目录。**顶层目录的增删属于架构决策**，需双管理者一致同意。
 
-## 3. 多平台目标布局（规划，当前不实施）
+## 3. 多平台布局（M1 已实施）
 
-当前仓库为超星单平台布局（后端包名 `chaoxing/`、配置 `chaoxing_config.json`、环境变量 `CHAOXING_*`）。智慧树支持开发期将重构为平台并列布局，**目标形态先行约定**如下，新增代码时避免加深对现状的耦合：
+仓库已完成平台并列布局（2026-09-12，M1 平台抽象重构，见 `docs/roadmap/zhihuishu.md`）：
 
 ```text
 backend/
-├── core/                  # 平台无关：任务编排 / JSON-line 协议 / AI 路由 / 内存治理（从 chaoxing/ 抽出）
+├── core/                  # 平台无关：JSON-line 协议 / 编排基础设施 / 浏览器引擎 / AI 路由 / 内存治理
+│   ├── constants / config / session / logging_setup / memory / tracking / utils / exceptions
+│   ├── browser/           # engine / js_runner / viewport / orphans（按 profile 的孤儿 Chrome 清扫）
+│   └── ai/                # doubao / deepseek / router / billing（平台无关）
 ├── platforms/
-│   ├── chaoxing/          # 超星平台实现（现 chaoxing/ 的平台相关部分迁入）
-│   └── zhihuishu/         # 智慧树平台实现（新增）
+│   ├── chaoxing/          # 超星平台实现（原 chaoxing/ 平台相关部分迁入；platform/ solvers/ font/ js/ data/ + api/orchestrator/discover/子入口）
+│   └── zhihuishu/         # 智慧树平台实现（M2 起建设）
+├── chaoxing/              # 兼容垫片：sys.modules 别名表 + 5 个 CLI 入口自替换转发（保 python -m chaoxing.* 旧命令）
 └── tests/
     ├── unit/  integration/  e2e/
     └── platforms/         # 按平台组织的测试镜像 platforms/ 结构
 ```
 
-- 平台模块实现统一的平台接口（登录态 / 课程扫描 / 章节处理 / 测验求解）；接口定义与拆分方案在智慧树调研后落于 [docs/roadmap/zhihuishu.md](../roadmap/zhihuishu.md) 与 `docs/design/`。
-- **重构约束**：目录搬迁与 import 修复必须一次 PR 内完成并保持测试绿；不允许「先搬一半」的中间态合并进 `main`。
+- 平台模块实现统一的平台能力面（登录态 / 课程扫描 / 章节处理 / 测验求解）；接口定义与拆分方案见 [docs/roadmap/zhihuishu.md](../roadmap/zhihuishu.md) 与 `docs/design/`。
+- **环境变量兼容**：`CHAOXING_WORKSPACE` / `CHAOXING_DATA_DIR` 等前缀名在 core 中沿用（历史约定，双平台共享）；平台专属 HEADED 开关支持 `{PLATFORM}_HEADED`（如 `ZHIHUISHU_HEADED`），`CHAOXING_HEADED` 对全平台生效。
+- **重构约束**：目录搬迁与 import 修复一次 PR 内完成并保持测试绿；不允许「先搬一半」的中间态合并进 `main`。
 - 前端 `frontend/` 保持平台无关：平台差异收纳在后端协议与数据模型内，前端不感知平台实现细节。
 
 ## 4. 禁止事项

@@ -2,6 +2,13 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12 — 智慧树 M0 调研完成 + M1 平台抽象重构（core/ + platforms/）
+
+- **M0 双轨调研完成**：`docs/reports/analysis/ZHIHUISHU_REFS_2026-09-12.md`（11 个 GitHub 项目 + 4 个 GreasyFork 脚本参考矩阵，标杆 = Autovisor/fuckZHS/Cooanyh）与 `ZHIHUISHU_ANALYSIS_2026-09-12.md`（Q1–Q8 全部落答 + 选择器「DOM+视觉」交叉确认清单）。关键实证：密码登录必触发易盾滑块且自动化环境被指纹检测拒绝（4 次实测）、扫码登录可行、学习页 URL 密文 = `hex(XOR("recruitId;courseId","zhihuishu"))` 已破译验证、**异常学习行为会锁课**（实测触发，已固化为工程红线）、2020 年油猴选择器词汇 2026 仍有效。技术路线决策 D2：浏览器自动化为主。
+- **M1 平台抽象重构**：`backend/chaoxing/` 拆分为 `core/`（协议/引擎/内存/追踪/AI/工具，平台无关）+ `platforms/chaoxing/`（超星实现）+ `chaoxing/`（兼容垫片：sys.modules 别名表 + 5 个 `-m` 入口自替换转发，旧命令与 monkeypatch 语义完全不变）。引擎参数化：`core/browser/orphans.py` 通用孤儿 Chrome 清扫（按 profile 目录）、`profile_dir_for_session`（新平台按 `chrome-profiles/<platform>/account-N` 隔离，超星保持历史平铺路径）、`{PLATFORM}_HEADED` 环境变量（`CHAOXING_HEADED` 继续全平台生效）、日志文件名前缀可设（`set_log_file_prefix`）。
+- **回归**：`python -m pytest tests/unit -q -s` 618 passed（零失败）；`python -m chaoxing.api --help` / `accounts list` 旧入口冒烟通过；`chaoxing.api is platforms.chaoxing.api` 模块同一性断言通过。
+- **凭据**：新增 `data/passwords/zhihuishu.txt`（git 忽略；`{...}` 块格式，Q7 决策 D4）。
+
 ## 2026-09-07 — 仓库打底：迁移至 JLU_Autonomous 并建立协作规范
 
 - **迁移**：项目自 [Chaoxing_auto](https://github.com/Joelin-CN/Chaoxing_auto)（基线 2026-08-27，commit `69847f6`）整体迁入本仓库，**未携带旧提交历史**（全新基线；旧仓库继续公开在线作为历史存档）。业务代码零改动。

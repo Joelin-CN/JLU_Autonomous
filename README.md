@@ -16,7 +16,7 @@
 ```text
 JLU_Autonomous/
 ├── frontend/     # Electron + Vue 3 桌面端（electron/ 主进程 + src/ 渲染进程）
-├── backend/      # Python 后端（chaoxing/ 包 + scripts/ + tests/ + CLI）
+├── backend/      # Python 后端（core/ 平台无关层 + platforms/ 平台实现 + chaoxing/ 兼容垫片 + tests/）
 ├── data/         # 运行时数据（凭据/浏览器档案/输出/日志，git 忽略）
 ├── references/   # 第三方参考脚本（git 忽略，仅索引）
 ├── docs/         # 文档中心（standards / roadmap / design / changelog / reports / validation / logs）
