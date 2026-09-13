@@ -444,6 +444,15 @@ def zhihuishu_login(account_index: int = 0) -> bool:
                 _QR_LOGIN_TIMEOUT,
             )
             if _wait_login_redirect(_QR_LOGIN_TIMEOUT, "扫码登录"):
+                # 跳转成功立刻导出（Cookie 跨子域传播可能延迟，校验失败也
+                # 不浪费这次扫码——storageState 已落盘供下次恢复），
+                # 校验失败间隔数秒重试一次（2026-09-13 晚真机竞态）。
+                export_login_state(account_index)
+                human_delay(2.5, 0.4)
+                if is_logged_in_on_course_list():
+                    return True
+                log("课程列表校验未过（Cookie 传播延迟？），重试一次", "WARN")
+                human_delay(4.0, 0.5)
                 return is_logged_in_on_course_list()
     except Exception as e:
         log(f"扫码登录流程异常：{e}", "WARN")
