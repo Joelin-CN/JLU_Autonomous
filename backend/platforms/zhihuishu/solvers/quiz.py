@@ -99,9 +99,10 @@ def parse_score(text: str):
     """从页面快照文本解析得分（对齐超星 submitter 的正则族）；无匹配 → None。"""
     if not text:
         return None
-    m = (re.search(r"得分[：:]\s*(\d+)", text)
-         or re.search(r"(\d+(?:\.\d+)?)\s*分", text)
-         or re.search(r"(\d+)\s*%", text))
+    m = (re.search(r"成绩是?[：:]?\s*(\d+(?:\.\d+)?)\s*分", text)
+         or re.search(r"得分[：:]\s*(\d+)", text)
+         or re.search(r"(\d+)\s*%", text)
+         or re.search(r"(\d+(?:\.\d+)?)\s*分", text))
     if not m:
         return None
     try:

@@ -103,6 +103,10 @@ class TestParseScore:
         assert parse_score("成绩 88分") == 88
         assert parse_score("正确率 100 %") == 100
 
+    def test_score_dialog_takes_priority(self):
+        # 真机提交弹窗文本；通用「N分」会误匹配题目标记「(2分)」——成绩模式优先
+        assert parse_score("你本次获得的成绩是 20 分 总分数 20 (2分)") == 20
+
     def test_none(self):
         assert parse_score("") is None
         assert parse_score("无分数信息") is None
