@@ -274,6 +274,70 @@ def click_option_letter(letter: str) -> bool:
         "  return JSON.stringify({ok: true});").get("ok", False)
 
 
+def confirm_multi_selection() -> bool:
+    """多选题的「确定」提交钮（题块内）。
+
+    真机巡检（2026-09-13 晚）发现多选（checkbox）选项点击后不点题块内
+    「确定」就翻页，选择被整卷丢弃——两道多选草稿全空而单选/判断正常，
+    与此机制完全吻合。无该按钮时返回 False（按无此交互处理）。
+    """
+    try:
+        return _exam_op(
+            "  const vis = exam.locator('.examPaper_subject:visible').first();\n"
+            "  const btn = vis.getByRole('button', {name: /确\\s*定/}).first();\n"
+            "  const n = await btn.count();\n"
+            "  if (!n) return JSON.stringify({ok: false, reason: 'no-confirm-btn'});\n"
+            "  await btn.click({timeout: 5000});\n"
+            "  await exam.waitForTimeout(600);\n"
+            "  return JSON.stringify({ok: true});", timeout=20).get("ok", False)
+    except Exception:
+        return False
+
+
+def read_selections() -> list:
+    """只读回读当前题各选项选中态（input.checked），返回已选字母表。"""
+    try:
+        st = _exam_op(
+            "  const r = await exam.evaluate(() => {\n"
+            "    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();\n"
+            "    const vis = [...document.querySelectorAll('.examPaper_subject')].find(s => {\n"
+            "      const cs = getComputedStyle(s); const rect = s.getBoundingClientRect();\n"
+            "      return cs.display !== 'none' && rect.height > 0;\n"
+            "    });\n"
+            "    if (!vis) return JSON.stringify({sel: []});\n"
+            "    const sel = [...vis.querySelectorAll('.nodeLab')]\n"
+            "      .filter(n => { const i = n.querySelector('input'); return i && i.checked; })\n"
+            "      .map(n => clean((n.querySelector('span.mr10') || {}).textContent).replace('.', ''));\n"
+            "    return JSON.stringify({sel});\n"
+            "  });\n"
+            "  return r;")
+        return st.get("sel", [])
+    except Exception:
+        return []
+
+
+def save_draft() -> bool:
+    """点「暂存作业」持久化草稿（含末题答案；不交卷不判分）。
+
+    站点保存机制是「点选项后点下一题才存」，末题没有下一题——grade-only
+    下用暂存收尾（与逐题草稿同语义，非提交）。真实提交模式无需此步。
+    """
+    try:
+        return _exam_op(
+            "  const btn = exam.getByRole('button', {name: /暂存作业/}).first();\n"
+            "  const n = await btn.count();\n"
+            "  if (!n) return JSON.stringify({ok: false, reason: 'no-btn'});\n"
+            "  await btn.click({timeout: 8000});\n"
+            "  await exam.waitForTimeout(1500);\n"
+            "  const confirm = exam.getByRole('button', {name: /确\\s*定/}).first();\n"
+            "  try { if (await confirm.count()) await confirm.click({timeout: 3000}); } catch (e) {}\n"
+            "  await exam.waitForTimeout(800);\n"
+            "  return JSON.stringify({ok: true});", timeout=30).get("ok", False)
+    except Exception as e:
+        log(f"暂存作业失败：{e}", "WARN")
+        return False
+
+
 def click_next_question() -> bool:
     """真实点击「下一题」按钮（仅真按钮；末题按钮禁用时返回 False）。
 
@@ -359,13 +423,15 @@ class ZhihuishuQuizSolver:
             log(f"[ZHS-Quiz] ({i}/{len(sections)}) {sec['name']}（入口 #{sec['idx']}）")
             self.stats["sections"] += 1
             try:
-                ok = self._solve_section(sec["idx"], sec["name"])
+                status = self._solve_section(sec["idx"], sec["name"])
             except Exception as e:
                 # 单节失败（如 AI 密钥缺失/网络异常）只计失败，不炸整个账号运行
                 log(f"「{sec['name']}」求解异常：{e}", "ERROR")
-                ok = False
-            if ok:
+                status = "failed"
+            if status == "solved":
                 self.stats["solved"] += 1
+            elif status == "skipped":
+                self.stats["skipped"] += 1
             else:
                 self.stats["failed"] += 1
             # 真实提交之间的拟人间隔（模拟运行/未提交则跳过）
@@ -409,27 +475,24 @@ async (page) => {
             pw("click", f"li.chapter-test .name >> nth={idx}", timeout=10)
         except Exception as e:
             log(f"点击测验入口 #{idx}「{section_name}」失败：{e}", "WARN")
-            return False
+            return "failed"
         human_delay(3.0, 0.5)
 
         # 2. 等试卷新标签页（真机实测：章测在新标签页打开 stuExamWeb）
         if not wait_for_exam_page(timeout_s=15):
             log(f"「{section_name}」未打开试卷页（可能为非测验内容），跳过", "WARN")
-            self.stats["skipped"] += 1
-            return True
+            return "skipped"
         info = exam_page_info()
         url = info.get("url", "")
         if "/dohomework/" not in url:
             # 列表页形态（#/webExamList?recruitId=）：v1 不深入，跳过并留档
             log(f"「{section_name}」打开的是试卷列表页而非具体试卷：{url[:80]}", "WARN")
-            self.stats["skipped"] += 1
             close_exam_page()
-            return True
+            return "skipped"
         if info.get("submitted") or int(info.get("subjects", 0)) < 1:
             log(f"「{section_name}」已交卷或无题面，跳过")
-            self.stats["skipped"] += 1
             close_exam_page()
-            return True
+            return "skipped"
 
         # 3. 逐题：读题型/选项（DOM 明文）→ 截图题干（加密渲染）→ AI 视觉 → 填答 → 下一题
         #    任何退出路径都留档+关试卷页，防陈旧标签让下一节错拿旧卷（第九轮教训）
@@ -474,16 +537,7 @@ async (page) => {
 
                 picked = map_answer_to_letters(answer, qtype, letters, texts)
                 log(f"第 {q_no} 题（{qtype}）AI={answer} → 点 {picked or '留空'}")
-                ok_click = False
-                for letter in picked:
-                    if click_option_letter(letter):
-                        ok_click = True
-                        human_delay(0.8, 0.2)
-                        if qtype != "multi":
-                            break  # 单选/判断一次点击；多选逐个点
-                    else:
-                        log(f"点击选项 {letter} 失败", "WARN")
-                if ok_click:
+                if self._fill_current(qtype, picked):
                     answered += 1
 
                 if not click_next_question():
@@ -493,9 +547,14 @@ async (page) => {
 
             log(f"「{section_name}」填答 {answered}/{total} 题")
 
-            # 4. 提交（grade_only 绝不提交/暂存——人工接管）
+            # 4. 收尾：grade_only 用「暂存作业」持久化草稿（站点保存机制是
+            #    「点选项后点下一题」，末题没有下一题——不暂存则末题答案丢失，
+            #    真机巡检实证）；暂存只存草稿不交卷不判分，仍属「填答不提交」。
+            #    真实模式直接提交。
             if self.grade_only:
-                log(f"[ZHS-Quiz] 模拟运行：「{section_name}」已填答未提交"
+                saved = save_draft() if total > 0 else True
+                log(f"[ZHS-Quiz] 模拟运行：「{section_name}」已填答"
+                    f"{'并暂存草稿' if saved else '（暂存失败，末题答案可能未保存）'}未提交"
                     f"（{self.course.get('name', '')}），请人工检查后接管")
             elif total > 0 and submit_exam():
                 human_delay(2.5, 0.5)
@@ -507,7 +566,38 @@ async (page) => {
             if total > 0:
                 self._capture_paper_screenshot(section_name)
             close_exam_page()
-        return submitted_ok if not self.grade_only else True
+        if self.grade_only:
+            return "solved"
+        return "solved" if submitted_ok else "failed"
+
+    def _fill_current(self, qtype: str, picked: list) -> bool:
+        """点击选项并校验选中态（多选先点题块内「确定」锁定），可补点一次。
+
+        真机巡检（2026-09-13 晚）实证：多选（checkbox）不点题块内「确定」
+        就翻页，选择整卷丢弃；单选/判断 radio 即点即中。校验统一回读
+        input.checked——字母是每次渲染随机的，checked 才是本体。
+        """
+        if not picked:
+            return False
+        target = list(picked)
+        for attempt in (1, 2):
+            for letter in target:
+                if not click_option_letter(letter):
+                    log(f"点击选项 {letter} 失败", "WARN")
+                human_delay(0.8, 0.2)
+            if qtype == "multi":
+                if confirm_multi_selection():
+                    log("多选「确定」已点击")
+                human_delay(0.5, 0.1)
+            got = read_selections()
+            if set(picked) <= set(got):
+                return True
+            missing = [l for l in picked if l not in got]
+            if attempt == 1 and missing:
+                log(f"选中校验缺失 {missing}（当前 {got}），补点一次", "WARN")
+                target = missing  # 只补缺：多选重复点会反选
+        log(f"选中校验未达标：目标 {picked} 实得 {got}", "WARN")
+        return bool(got)
 
     def _capture_paper_screenshot(self, section_name: str) -> None:
         """留档：交卷前的答题卡/完成率整页截图（人工核对用；grade-only 关键证据）。"""
