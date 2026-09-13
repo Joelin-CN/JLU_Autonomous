@@ -18,6 +18,7 @@ from platforms.zhihuishu.solvers.quiz import (
     parse_answer_letters,
     parse_reveal_letters,
     parse_score,
+    sanitize_fill_text,
 )
 
 
@@ -80,6 +81,20 @@ class TestMapAnswerToLetters:
     def test_no_match(self):
         assert map_answer_to_letters(None, "judge", ["A", "B"], ["对", "错"]) == []
         assert map_answer_to_letters("Z", "single", ["A", "B"], ["x", "y"]) == []
+
+
+class TestSanitizeFillText:
+    def test_takes_first_line_and_strips(self):
+        # AI 可能附带解释——只取首行
+        assert sanitize_fill_text("CMOS\n解析：因为...") == "CMOS"
+        assert sanitize_fill_text("  触发器  ") == "触发器"
+
+    def test_list_and_none(self):
+        assert sanitize_fill_text(["a", "b"]) == "a、b"
+        assert sanitize_fill_text(None) == ""
+
+    def test_length_cap(self):
+        assert len(sanitize_fill_text("x" * 900)) == 500
 
 
 class TestParseScore:

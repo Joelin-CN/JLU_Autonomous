@@ -154,6 +154,16 @@ def map_answer_to_letters(answer, qtype: str, option_letters: list,
     return letters
 
 
+def sanitize_fill_text(answer) -> str:
+    """填空题答案清洗：取首行、去首尾空白、限长 500（AI 可能附带解释）。"""
+    if answer is None:
+        return ""
+    if isinstance(answer, list):
+        answer = "、".join(str(a) for a in answer)
+    first_line = str(answer).strip().splitlines()[0] if str(answer).strip() else ""
+    return first_line.strip()[:500]
+
+
 # ── 浏览器探针（JS 仅只读；点击一律 locator 真实事件）────────────────
 
 
@@ -274,6 +284,29 @@ def click_option_letter(letter: str) -> bool:
         "  return JSON.stringify({ok: true});").get("ok", False)
 
 
+def fill_text_answer(text: str) -> bool:
+    """填空题作答：定位当前题块内第一个文本框并填写（locator.fill 真实输入）。
+
+    填空题无选项节点（.nodeLab），题块内是 textarea/输入框；选择器按
+    textarea 优先、可见 text input 兜底。找不到输入框返回 False。
+    """
+    safe = text.replace("\\", "\\\\").replace("'", "\\'")
+    try:
+        return _exam_op(
+            "  const vis = exam.locator('.examPaper_subject:visible').first();\n"
+            "  let box = vis.locator('textarea:visible').first();\n"
+            "  if (!(await box.count())) {\n"
+            "    box = vis.locator('input[type=text]:visible').first();\n"
+            "  }\n"
+            "  if (!(await box.count())) return JSON.stringify({ok: false, reason: 'no-input'});\n"
+            f"  await box.fill('{safe}', {{timeout: 8000}});\n"
+            "  await exam.waitForTimeout(400);\n"
+            "  return JSON.stringify({ok: true});", timeout=20).get("ok", False)
+    except Exception as e:
+        log(f"填空题填写失败：{e}", "WARN")
+        return False
+
+
 def confirm_multi_selection() -> bool:
     """多选题的「确定」提交钮（题块内）。
 
@@ -389,13 +422,27 @@ def click_next_question() -> bool:
 
 
 def submit_exam() -> bool:
-    """真实提交试卷（「提交作业」+ 确认弹窗）。grade_only 永不调用。"""
+    """真实提交试卷（「提交作业」+ 确认弹窗）。grade_only 永不调用。
+
+    按钮可能非 role=button（.btn 族 div）——与暂存同款定位器回退；
+    确认弹窗同样回退。提交后等待判分页面稳定再返回。
+    """
     try:
         ok = _exam_op(
-            "  await exam.locator('text=提交作业').first().click({timeout: 8000});\n"
-            "  await exam.waitForTimeout(1500);\n"
-            "  const confirm = exam.locator('text=确定').first();\n"
-            "  try { await confirm.click({timeout: 3000}); } catch (e) {}\n"
+            "  let btn = exam.getByRole('button', {name: /提交作业/}).first();\n"
+            "  if (!(await btn.count())) {\n"
+            "    btn = exam.locator('.btn, div[class*=btn], a[class*=btn], span[class*=btn]')\n"
+            "      .filter({hasText: /提交作业/}).first();\n"
+            "  }\n"
+            "  if (!(await btn.count())) return JSON.stringify({ok: false, reason: 'no-btn'});\n"
+            "  await btn.click({timeout: 8000});\n"
+            "  await exam.waitForTimeout(2000);\n"
+            "  let confirm = exam.getByRole('button', {name: /^确\\s*定$/}).first();\n"
+            "  if (!(await confirm.count())) {\n"
+            "    confirm = exam.locator('.btn, div[class*=btn]').filter({hasText: /^确\\s*定$/}).first();\n"
+            "  }\n"
+            "  try { if (await confirm.count()) { await confirm.click({timeout: 3000}); } } catch (e) {}\n"
+            "  await exam.waitForTimeout(2000);\n"
             "  return JSON.stringify({ok: true});", timeout=40).get("ok", False)
         return ok
     except Exception as e:
@@ -536,7 +583,38 @@ async (page) => {
                 q_no += 1
                 check_signals()
                 q = read_current_question()
+                # 无选项的题：填空（作答）/简答（留空）——其余情形才收卷
                 if q.get("noVisible") or not q.get("options"):
+                    qtype0 = detect_question_type(q.get("typeText", ""), 0)
+                    if not q.get("noVisible") and qtype0 in ("fill", "essay"):
+                        total += 1
+                        screen_num = str(q.get("num", "")).strip()
+                        if screen_num and screen_num == last_screen_num:
+                            log(f"屏幕题号停在 {screen_num}（翻页无效），按末题收卷")
+                            break
+                        last_screen_num = screen_num
+                        if qtype0 == "essay":
+                            log(f"第 {q_no} 题（essay）简答留空（设计如此）")
+                        else:
+                            TMP_DIR.mkdir(parents=True, exist_ok=True)
+                            shot0 = str(TMP_DIR / f"zhs_quiz_q{q_no}.png")
+                            fill_text = ""
+                            if screenshot_current_question(shot0):
+                                try:
+                                    answers0 = ai_solve_quiz_image(
+                                        [shot0], self.course.get("name", ""), section_name)
+                                    fill_text = sanitize_fill_text(
+                                        answers0[0].get("answer") if answers0 else None)
+                                except Exception as e:
+                                    log(f"第 {q_no} 题 AI 作答失败：{e}", "WARN")
+                            log(f"第 {q_no} 题（fill）AI={fill_text[:40] or '空'} → 填写")
+                            if fill_text and fill_text_answer(fill_text):
+                                answered += 1
+                        if not click_next_question():
+                            log("无「下一题」（已到最后一题）")
+                            break
+                        human_delay(2.2, 0.4)
+                        continue
                     log(f"第 {q_no} 题不可见或无选项，停止本卷", "WARN")
                     break
                 # 防死循环（第十轮教训）：点过「下一题」后屏幕题号不变 = 已到
