@@ -20,6 +20,7 @@ import os
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 
 from core.config import cfg
 from core.constants import WORKSPACE, TMP_DIR, SCREENSHOTS_DIR
@@ -319,6 +320,10 @@ def _screenshot_ticket(ticket_id: str, title: str, message: str,
         "resolved": False,
         "imageBase64": img_b64,
         "timeoutSeconds": int(timeout_note),
+        # 渲染层倒计时以它为锚点；缺失会导致 NaN:NaN（超星工单由
+        # content handlers 盖章，智慧树此前漏了）。ISO-毫秒-UTC，与 LOG 对齐。
+        "createdAt": datetime.now(timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z"),
     })
 
 

@@ -143,7 +143,12 @@ class MemoryMonitor(threading.Thread):
             try:
                 project_gb = measure_project_chrome_gb(self.profile_root)
                 system_gb = measure_system_used_gb()
-            except MemorySamplerError as e:
+            except Exception as e:
+                # 采样失败只降级（跳过本轮），绝不杀监视线程——真机实测多
+                # Chrome 进程时 PowerShell CIM 查询可超 20s 抛 TimeoutExpired
+                # （并非 MemorySamplerError），无此兜底监视线程会死亡，后续
+                # MEMORY 事件与急停判定全部失效（gate 的采样自带 fail-open
+                # 不受影响）。
                 log(f"Memory sampler degraded: {e}", "WARN")
                 continue
             with self._lock:

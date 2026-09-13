@@ -46,6 +46,13 @@ function mapMode(mode: string): 'full' | 'scan_only' | 'solve_only' {
   return 'full'
 }
 
+/** 解析 ISO 字符串 / epoch 毫秒为时间戳；非法或缺失返回 null。 */
+function _parseEpochMs(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
 function mapBackMode(mode?: 'full' | 'scan_only' | 'solve_only'): ModeType {
   if (mode === 'scan_only') return 'course-scan'
   if (mode === 'solve_only') return 'batch-exec'
@@ -96,9 +103,11 @@ function mapElectronTicket(ticket: any): Ticket {
     severity,
     accountId: ticket.accountId != null ? String(ticket.accountId) : undefined,
     resolved: ticket.resolved,
-    resolvedAt: ticket.resolvedAt ? new Date(ticket.resolvedAt).getTime() : undefined,
+    resolvedAt: _parseEpochMs(ticket.resolvedAt) ?? undefined,
     resolution: ticket.resolution,
-    createdAt: new Date(ticket.createdAt).getTime(),
+    // 后端工单并非都带 createdAt（智慧树扫码/滑块工单历史上就没盖）——解析
+    // 失败回落当前时刻，避免倒计时落到 NaN:NaN。
+    createdAt: _parseEpochMs(ticket.createdAt) ?? Date.now(),
     kind: classifyTicketKind(ticket, isCaptcha),
     imageBase64: ticket.imageBase64,
     timeoutSeconds: typeof ticket.timeoutSeconds === 'number' ? ticket.timeoutSeconds : undefined,

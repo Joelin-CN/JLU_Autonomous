@@ -96,6 +96,10 @@ export async function measureProjectChromeGB(profileRoot: string): Promise<numbe
     `$p=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'";` +
       `$m=$p|Where-Object{$_.CommandLine -like '*${esc}*'};` +
       `$s=($m|Measure-Object -Property WorkingSetSize -Sum).Sum;` +
+      // 没有项目 Chrome 进程时 Sum 为 $null → PowerShell 输出空串，会被
+      // runPs 当作探针失败、连带系统测量一起回退到 os 估计。显式归零
+      // （与后端 core/memory.py 的同款脚本守卫一致）。
+      `if($null -eq $s){$s=0};` +
       `[Console]::Out.Write([string]$s)`,
   )
   return Number(out) / 1024 ** 3

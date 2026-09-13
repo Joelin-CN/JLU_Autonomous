@@ -239,6 +239,9 @@ export class MockApiClient implements AppApi {
     const captchaTimer = setTimeout(() => {
       if (!simulation.running) return
       const accountId = payload.accounts?.[0] ?? '0'
+      // 演示工单的 accountId 必须可被 captchaStore.parseAccountId 解析为整数
+      // （mock 账号 id 是 acct_* 字符串，直接透传会令提交/跳过报错）。
+      const numericAccountId = String(Number.parseInt(String(accountId), 10) || 0)
       const stamp = Math.floor(Date.now() / 1000)
       const demo: Ticket = jobPlatform === 'zhihuishu'
         ? {
@@ -247,7 +250,7 @@ export class MockApiClient implements AppApi {
             title: '智慧树扫码登录',
             message: `账号 ${accountId}：请使用智慧树 App 扫描二维码登录（storageState 未命中）`,
             severity: 'critical',
-            accountId: String(accountId),
+            accountId: numericAccountId,
             platform: jobPlatform,
             kind: 'qrcode',
             imageBase64: MOCK_QR_IMAGE,
@@ -261,7 +264,7 @@ export class MockApiClient implements AppApi {
             title: '需要人工输入验证码',
             message: `账号 ${accountId} 在反爬验证码处受阻，AI 识别失败，请人工输入`,
             severity: 'critical',
-            accountId: String(accountId),
+            accountId: numericAccountId,
             platform: jobPlatform,
             kind: 'captcha',
             imageBase64: MOCK_CAPTCHA_IMAGE,

@@ -106,16 +106,19 @@ describe('MockApiClient 双平台并行任务模拟', () => {
     expect((await flush(client.getJobStatus(cx.jobId))).status).not.toBe('idle')
   })
 
-  it('演示工单带 jobId（供 resolveCaptcha 双平台路由）', async () => {
+  it('演示工单带 jobId 与可解析的数字 accountId（供 resolveCaptcha 双平台路由）', async () => {
     const client = new MockApiClient()
-    const tickets: Array<{ id: string; platform?: string; jobId?: string }> = []
-    client.onTicket((t) => tickets.push({ id: t.id, platform: t.platform, jobId: t.jobId }))
+    const tickets: Array<{ id: string; platform?: string; jobId?: string; accountId?: string }> = []
+    client.onTicket((t) => tickets.push({ id: t.id, platform: t.platform, jobId: t.jobId, accountId: t.accountId }))
 
-    const cx = await start(client, payload('chaoxing', ['0']))
+    const cx = await start(client, payload('chaoxing', ['acct_demo_1']))
     await vi.advanceTimersByTimeAsync(4100)
 
     const demo = tickets.find((t) => t.platform === 'chaoxing')
     expect(demo).toBeDefined()
     expect(demo?.jobId).toBe(cx.jobId)
+    // captchaStore.parseAccountId 要求整数——mock 账号 id 是 acct_* 字符串，
+    // 演示工单必须给出可解析的数字 accountId，否则提交/跳过会报错压按钮
+    expect(Number.isInteger(Number(demo?.accountId))).toBe(true)
   })
 })

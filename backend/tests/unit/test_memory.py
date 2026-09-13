@@ -1,5 +1,6 @@
 import math
 import subprocess
+import time
 
 import pytest
 
@@ -83,3 +84,41 @@ def test_measure_system_used_gb(monkeypatch):
     fake = subprocess.CompletedProcess([], 0, stdout="14.6\n", stderr="")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: fake)
     assert measure_system_used_gb() == pytest.approx(14.6)
+
+
+def test_monitor_thread_survives_sampler_exception(monkeypatch):
+    """采样抛 TimeoutExpired（真机多 Chrome 时 CIM 查询 20s 超时）不得杀死监视线程。
+
+    真机联测（2026-09-13）暴露：run() 原来只捕 MemorySamplerError，
+    subprocess.TimeoutExpired 直接穿透导致线程死亡——后续 MEMORY 事件与
+    急停判定全部失效。修复后任何采样异常只降级跳过本轮。
+    """
+    import chaoxing.memory as mem
+
+    monkeypatch.setattr(mem, "SAMPLE_INTERVAL_S", 0.02)
+
+    calls = {"n": 0}
+
+    def flaky_measure(_root):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise subprocess.TimeoutExpired(cmd=["powershell"], timeout=20)
+        return 0.5
+
+    monkeypatch.setattr(mem, "measure_project_chrome_gb", flaky_measure)
+    monkeypatch.setattr(mem, "measure_system_used_gb", lambda: 10.0)
+
+    events = []
+    mon = mem.MemoryMonitor(
+        budget_gb=5.0, system_limit_gb=30.0, initial_estimate_gb=0.7,
+        profile_root="X", on_event=events.append, on_emergency=lambda: None)
+    mon.start()
+    deadline = time.time() + 2
+    while not events and time.time() < deadline:
+        time.sleep(0.01)
+    mon.stop()
+    mon.join(timeout=1)
+
+    assert calls["n"] >= 2, "第一轮异常后应继续采样"
+    assert events, "采样异常被吞后，监视线程应继续发出 MEMORY 事件"
+    assert events[0]["type"] == "MEMORY"
