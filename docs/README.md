@@ -22,7 +22,7 @@
 | [standards/directory.md](standards/directory.md) | 目录规范：什么放哪里 + 多平台目标布局 |
 | [standards/documents.md](standards/documents.md) | 文件规范：命名 / 归档 / 文档同步义务 |
 | [standards/secrets.md](standards/secrets.md) | 凭据红线：入库禁令与泄露应急 |
-| [roadmap/zhihuishu.md](roadmap/zhihuishu.md) | 智慧树支持路线图（M0–M4 已落地，M4 真机补验待扫码+AI 密钥；含 ADR D2–D6） |
+| [roadmap/zhihuishu.md](roadmap/zhihuishu.md) | 智慧树支持路线图（M0–M4 已落地并真机验证；含 ADR D2–D6 与滑块专项结论） |
 | [design/architecture.md](design/architecture.md) | 架构全景（core/ + platforms/ 多平台布局 + 智慧树链路要点） |
 | [design/api.md](design/api.md) | 前后端完整 API 契约（三层协议，含 platform 路由） |
 | [design/integration.md](design/integration.md) | 前后端整合细节与运行约定 |

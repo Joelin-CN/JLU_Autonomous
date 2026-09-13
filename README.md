@@ -9,7 +9,7 @@
 | 平台 | 状态 | 说明 |
 |------|------|------|
 | 超星学习通 | ✅ 已支持 | 现有全部功能：课程扫描、章节处理、AI 测验答题、多账号并发 |
-| 智慧树 (zhihuishu.com) | 🚧 建设中 | 登录（扫码优先 + storageState 免扫码）✅ · 课程/章节扫描 ✅ · 视频任务（D6 决策：仅 1.0 倍速真实播放）✅ · 答题求解（M4）✅ 已落地（真机全链路验证待补：扫码 + AI 密钥） · 滑块自动求解 ⏸ 维持人工工单（专项结论见 [docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md](docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md)）；路线图见 [docs/roadmap/zhihuishu.md](docs/roadmap/zhihuishu.md) |
+| 智慧树 (zhihuishu.com) | 🚧 建设中 | 登录（扫码优先 + storageState 免扫码）✅ · 课程/章节扫描 ✅ · 视频任务（D6 决策：仅 1.0 倍速真实播放）✅ · 答题求解（M4）✅ 已落地并真机验证（草稿 10/10 · 完成率 100% · 未提交；判断/单选/多选支持，填空/简答留空） · 滑块自动求解 ⏸ 维持人工工单（专项结论见 [docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md](docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md)）；路线图见 [docs/roadmap/zhihuishu.md](docs/roadmap/zhihuishu.md) |
 
 > 桌面端品牌为「**JLU 学习助手**」：侧栏顶部的平台切换器（超星 / 智慧树）是全局一级维度，账号、课程、任务与工单均按当前平台分桶展示；任务按钮按各平台能力矩阵显隐（智慧树「仅刷题」已随 M4 落地开放，「仅内容」仍引导到视频任务）。
 
