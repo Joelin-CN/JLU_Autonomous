@@ -525,3 +525,58 @@ chaoxing_cli.bat full-auto --all-accounts --headed
   「同平台运行中」禁用；`memory.store` 事件/计划按平台分桶。
 - mock 层 `simulations Map`：同平台再启动=替换旧仿真（模拟互斥），跨平台并存，
   事件带 `jobId`/`platform`——dev mock 模式可完整演示双平台并行。
+
+## 运行时内存监督与执行页预算仪表（2026-09-13）
+
+### 内存监督（策略 C，Electron 主进程）
+
+- **决策纯函数** `electron/memory/supervision.ts`（不 import electron，vitest 直测）：
+  `decidePauseAction(sample, slots, now, lastEngageAt, cooldownMs)` ——
+  `systemUsedGB ≥ systemLimitGB − 1GB`（预警线）时，对「运行中且未被监督暂停」的
+  槽位里 `projectChromeGB`（最新 MEMORY 事件喂入）最大者发暂停指令；60s 冷却防
+  暂停风暴；无可暂停对象不动作（红线兜底仍是后端 MemoryMonitor fail-closed 急停）。
+- **服务** `electron/memory/supervisor.ts`（IO 编排，可 import electron）：
+  10s 定时器 `planner.measureSystemUsedGB` 自测 + `jobSlots.activeSlots()` 观测 →
+  纯函数决策 → 介入时经 job.handler 回调执行整任务暂停（与手动暂停同路径，含
+  JobStatus 同步）+ 系统 Notification（`settings.notifications` 门控）+
+  `on-memory-supervision` 推送。**只暂停不自动恢复**（防抖动）；用户手动「继续」
+  时 `markResumed` 清除介入标记；测量失败跳过本轮；无活跃槽位自动停表。
+- **接线**（`job.handler.ts`）：`job:start` acquire 后 `start(plan.systemLimitGB)`；
+  MEMORY 转发处 `noteUsage(platform, projectChromeGB)`；`resumeWholeJob` 清标记；
+  `stopAllJobs` 停表。
+
+### 执行页分平台预算仪表
+
+- `ExecutionStudioView` 每个平台分组（运行/暂停态）在 Runtime Banner 下渲染
+  `BudgetGauge` compact 横条（新增 `compact` 变体），消费 `memory.store` 的
+  `planFor(platform)` / `latestFor(platform)`（projectChromeGB / remainingCount）；
+  顶部监督提示条仅在 `supervision.state === 'engaged'` 时显示（armed 不打扰）。
+- `memory.store` 增 `supervision` ref（订阅 `onMemorySupervision`）与 `reset()`
+  （全空闲清状态，取代原 `setPlan(null)` 调用点）。
+
+### mock 合成 MEMORY（dev 演示补全）
+
+- `MockApiClient.onMemory` 从 noop 改真实监听；`simulateJob` 每 tick 发合成
+  MEMORY 快照（占用 ≈ 0.45×活跃 lane + 漂移，字段口径对齐后端）。
+- mock `startJob` 为 JobHandle 附 `memoryPlan`：单平台满额（32/14/13.5 全局口径），
+  双平台并行按剩余分账语义合成（内联迷你 `allocateBudget`——渲染层不可 import
+  electron/，后来者 clamp 到 0.7GB 单账号下限、systemLimitGB 保持全机值）；
+  `execution.store.startJob` 即写 `setPlan`，仪表启动即可见。
+
+## 智慧树 M4 答题求解（2026-09-13）
+
+- **solver** `platforms/zhihuishu/solvers/quiz.py`（架构对齐超星 quiz solver 的
+  瘦身版，单文件双策略）：章树真实点击 `li.chapter-test` → 只读 JS 抽取题面
+  （`.examPaper_subject` / `.subject_describe` / `.examquestions-answer .subject_node`
+  抽取与点击同链保证 nth 索引一致）→ `core.ai.router` 文本作答（题干空走整页截图
+  兜底 `ai_solve_quiz_image`）→ 按字母/判断映射真实点击填答（fill 经快照 textbox
+  ref、essay 留空）→ 快照文本定位提交 + 确认 + 得分解析。安全档位对齐超星：
+  `dry_run` 纯跳过、`grade_only` 填答不提交、真实提交间 60–120s 随机节奏、每节
+  `check_signals()` 让位、单节异常隔离（AI 密钥缺失等只计失败不炸账号运行）。
+- **弹题三层链路**（`video.py`）：试选揭示法（406653 技巧，确定性，第一优先）→
+  揭示失败走 AI 路由（判断型映射 A/B）→ 再失败关闭弹题发 hint 工单，不卡视频流。
+- **接线**（`api.py`）：`VALID_PHASES` 补 `solve_quiz`；`solve_only` 语义修正为仅
+  答题跳过视频（原为 full 别名的遗留缺陷，`quiz_only` 双构造路径自洽推导）；
+  `--grade-only` / `--dry-run` 旗标贯通 `RunConfig`。
+- **能力矩阵翻转**：`platforms.ts` zhihuishu `solveOnly: true`（去「M4 开发中」
+  置灰），「仅刷题」按钮开放：batch-exec → solve_only → M4 solver。

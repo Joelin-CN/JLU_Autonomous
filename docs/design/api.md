@@ -1,9 +1,16 @@
 # 前后端交互 API 文档 — JLU Autonomous
 
-> **版本**: v1.6
-> **更新**: 2026-09-12
+> **版本**: v1.7
+> **更新**: 2026-09-13
 > **审计**: 多 Agent 并行全代码库审查 + correctness pass 续轮校正
 > **目的**: 定义前端 (Electron + Vue 3) 与后端 (Python/JS 脚本) 之间的完整接口契约，供前后端独立开发和后续仓库融合使用。
+
+> **v1.7 变更**：内存监督（策略 C）+ 执行页分平台预算仪表 + 智慧树 M4 答题落地。新增主进程
+> push 通道 `on-memory-supervision`（§3.1/§10.2——系统占用逼近红线时对占用较大平台槽位整任务
+> 暂停 + 系统通知，只暂停不自动恢复）；§4.3 补 `MEMORY` 事件小节（字段口径原在 §10.2）；
+> 智慧树 `VALID_PHASES` 增 `solve_quiz`，`solve_only` 语义修正为「仅答题跳过视频」（此前是
+> `full` 的别名遗留缺陷），入口新增 `--grade-only`（模拟运行：填答不提交）/`--dry-run`（纯跳过）
+> 旗标；渲染层执行页每平台分组显示预算仪表（消费 `memory.store` 分桶 + mock 合成 MEMORY 事件）。
 
 > **v1.6 变更**：双平台并行任务执行——`job:start` 互斥从全局改为**同平台互斥、跨平台并行**
 >（每平台一个执行槽位）；spawn 时内存预算改为**动态剩余分账**（独跑全额、后启拿剩余/最低
@@ -614,7 +621,7 @@ const IPC_CHANNELS = {
   DIALOG_OPEN_FILE:        'dialog:open-file',
   SYSTEM_VALIDATE_PYTHON:  'system:validate-python',
 
-  // Main → Renderer (push) — 8 个通道
+  // Main → Renderer (push) — 9 个通道
   ON_PROGRESS:      'on-progress',
   ON_PHASE_CHANGE:  'on-phase-change',
   ON_LOG:           'on-log',
@@ -623,6 +630,7 @@ const IPC_CHANNELS = {
   ON_ERROR:         'on-error',
   ON_RESULT:        'on-result',
   ON_MEMORY:        'on-memory',
+  ON_MEMORY_SUPERVISION: 'on-memory-supervision',
 } as const
 ```
 
@@ -641,6 +649,7 @@ const IPC_CHANNELS = {
 | `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径（载荷含可选 `platform` / `accountsFile`，按平台路由 `platforms.<platform>.accounts`；`default-path` 接受 `{ platform? }` 按平台返回 `passwords/<platform>.txt`） |
 | `dialog:open-file` | 文件选择器（自定义账号文件） |
 | `on-memory` | 后端 `MEMORY` 事件推送（预算仪表） |
+| `on-memory-supervision` | 主进程内存监督介入推送（策略 C，仅 engaged 时发；见 §10.2） |
 
 ### 3.2 Invoke 通道详情
 
@@ -1011,11 +1020,17 @@ spawn('python', ['-m', 'platforms.<platform>.api', ...args], {
 | `--job-id` | `string` | 任务唯一标识 |
 | `--accounts` | `string` | 逗号分隔的账号 ID 列表 |
 | `--mode` | `string` | `full` / `scan_only` / `solve_only` |
+| `--grade-only` | `flag` | 模拟运行：答题走完整导航→抽取→AI→填答但**绝不提交**（映射前端「模拟运行」开关；超星自 2026-08 起支持，智慧树 v1.7 起随 M4 落地） |
+| `--dry-run` | `flag` | 答题阶段纯跳过（零导航零提交；CLI/测试用，前端不映射） |
 | `--courses` | `string` | 逗号分隔的课程 ID 列表（可选） |
 | `--max-concurrent` | `int` | 运行时信号量大小（Electron 按内存/CPU 计划计算） |
 | `--budget-gb` | `float` | 项目内存预算（GB） |
 | `--system-limit-gb` | `float` | 系统已用内存急停阈值 |
 | `--per-account-estimate-gb` | `float` | 初始单 Chrome 实例估算 |
+
+**模式语义（v1.7 修正）**：智慧树 `solve_only` 此前是 `full` 的别名（遗留缺陷），现为
+**仅答题跳过视频**——扫描后直接进入 M4 答题阶段；`full` = 视频先跑完再答题。智慧树
+`VALID_PHASES` 相应补 `solve_quiz`（与超星对齐）。超星 `solve_only` 语义不变（仅刷题）。
 
 **Chromium 内存优化参数**（由 Bridge 自动注入）:
 ```
@@ -1237,6 +1252,33 @@ Python 子进程通过 stdout 输出 **每行一个 JSON 对象**。主进程逐
 ```
 
 **触发时机**: 所有课程处理完毕，正常退出。
+
+---
+
+#### `MEMORY` — 内存快照（v1.7 补文档，协议自 2026-08-13 起存在）
+
+```json
+{
+  "type": "MEMORY",
+  "jobId": "job_1719312000000_a1b2c3",
+  "budgetGB": 12.9,
+  "projectChromeGB": 1.1,
+  "perAccountAvgGB": 0.55,
+  "remainingCount": 17,
+  "level": "info",
+  "message": "project=1.10GB avg=0.55GB"
+}
+```
+
+**字段**: `budgetGB` 本进程预算份额；`projectChromeGB` 项目 Chrome 进程树实测占用；
+`perAccountAvgGB` 单账号 EWMA 均值；`remainingCount` 预算内还可开的实例数；
+`level`：`info` 常规 / `critical` 急停已触发。
+
+**特性**: 进程级快照（无账号维度、后端不带 `platform`）；仅当 spawn 传了
+`--system-limit-gb` 时由 `core.memory.MemoryMonitor` 每 5s 发射；主进程转发时统一
+盖 `platform` 章——它是渲染层按平台分桶显示（执行页预算仪表）的唯一依据，也是
+内存监督器（§10.2）观测各平台占用的数据源。mock 模式由 `MockApiClient` 每 tick
+合成同构事件（份额口径与 `allocateBudget` 一致）。
 
 ### 4.4 生命周期管理
 
@@ -1714,11 +1756,31 @@ AttentionQueueView — 使用 3 个 Store: Attention, Campaign, Log
 ### 10.2 协议事件
 
 - `PROGRESS` 新增可选 `accountId`（整数）与 `laneStatus`（`queued` / `running` / `error`）。
-- 新增 `MEMORY` 事件：
+- 新增 `MEMORY` 事件（字段口径见 §4.3 MEMORY 小节）：
 
 ```json
 {"type":"MEMORY","jobId":"...","budgetGB":12.9,"projectChromeGB":1.1,
  "perAccountAvgGB":0.55,"remainingCount":17,"level":"info","message":"..."}
+```
+
+**内存监督（策略 C，v1.7）**——主进程 Electron 层行为，不涉及 NDJSON 协议：
+
+- `electron/memory/supervision.ts`（纯函数）+ `supervisor.ts`（IO 编排）：
+  10s 定时器用 `planner.measureSystemUsedGB` 自测系统占用，叠加双路 MEMORY 事件
+  喂入的各平台 `projectChromeGB`；`systemUsedGB ≥ systemLimitGB − 1GB`（预警线）
+  时对「运行中且未被监督暂停」的槽位里占用最大者执行**整任务暂停**（与用户手动
+  暂停同一路径：`bridge.pause()` + `JobStatus` 同步）+ 系统 `Notification`
+  （沿用 `settings.notifications` 门控）+ 推送渲染层。
+- **只暂停不自动恢复**（防抖动：内存不会因暂停瞬间回落）；恢复由用户在执行页
+  手动「全部继续」，resume 时清除该平台的介入标记（再越线允许重新介入）。
+- 两次介入之间 60s 冷却（防暂停风暴）；无可暂停对象（全暂停/无运行槽位）不动作，
+  红线兜底仍由后端 MemoryMonitor 的 fail-closed 急停负责。
+- 渲染层推送通道 `on-memory-supervision`（仅介入时发，armed 不打扰）：
+
+```json
+{"type":"MEMORY_SUPERVISION","state":"engaged","systemUsedGB":27.8,
+ "thresholdGB":27.5,"systemLimitGB":28.5,"platform":"zhihuishu",
+ "at":"2026-09-13T08:00:00.000Z","message":"系统内存 27.8GB 逼近红线 27.5GB，已自动暂停 zhihuishu 任务（恢复请手动点击「继续」）。"}
 ```
 
 ### 10.3 账号与 AI 子命令

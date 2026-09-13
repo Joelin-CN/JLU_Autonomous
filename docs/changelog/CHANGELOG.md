@@ -2,6 +2,17 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-13（续二）— P1 增量收尾 + 智慧树 M4 答题落地：内存监督 / 预算仪表 / CIM 采样提速 / CI 触发 / M4 solver / 滑块专项
+
+- **CI 触发修复（.github/workflows/ci.yml）**：`pull_request` 补 `types: [opened, synchronize, reopened, edited]`——默认 types 不含 edited，PR 改基分支后 required checks 不重跑（上一会话被迫空提交触发）。workflow 改动在本 PR 自身不生效（GitHub 限制），合入 main 后生效。
+- **CIM 采样性能（core/memory.py，报告 `docs/reports/fixes/MEMORY_FIX_2026-09-13.md`）**：`measure_project_chrome_gb` 三层优化——PS 脚本头部 `Get-Process` 粗筛快路径（无 chrome 直接输出 0 完全跳过 CIM，空闲态采样 20s 级 → 亚秒级）+ CIM `-Property WorkingSetSize,CommandLine` 属性投影（降低多进程编组开销）+ 模块级 TTL(2s) 缓存按 profile_root 键控（去重 Monitor 与 gate 并发查询；失败不缓存；`_clear_measure_cache` 测试钩子）。前端 planner.ts 同款脚本镜像前两层。单测 +5。
+- **内存监督（策略 C，electron）**：决策纯函数 `memory/supervision.ts`（不 import electron，vitest +11）——`systemUsedGB ≥ systemLimitGB − 1GB` 预警线时对占用较大平台槽位发暂停指令、60s 冷却、不决策恢复；服务 `memory/supervisor.ts` 10s 自测 + MEMORY 事件喂入 → 介入时整任务暂停（与手动暂停同路径）+ 系统 Notification + `on-memory-supervision` 推送（additive 协议增量，mock 不模拟）；测量失败跳过、无槽位自动停表、用户手动继续清介入标记。渲染层 memory.store 增 supervision 状态。
+- **执行页分平台预算仪表**：`BudgetGauge` 增 compact 横条变体，每个平台分组（运行/暂停态）在 banner 下渲染，消费 `memory.store.planFor/latestFor`；监督介入提示条仅 engaged 时显示。mock 层补齐：`onMemory` 真实监听 + `simulateJob` 每 tick 合成 MEMORY（口径对齐后端）+ handle 附分账 memoryPlan（迷你 allocateBudget，双平台 13.5→0.7 下限）；`execution.store.startJob` 即写 setPlan。测试 +2；UI 双确认（dev mock 双任务分屏截图 + vision 审查）布局无缺陷、分账差异正确呈现。
+- **智慧树 M4 答题求解落地**：新 `platforms/zhihuishu/solvers/quiz.py`（架构对齐超星 quiz solver 瘦身版）——章树真实点击 `li.chapter-test` → 只读 JS 抽取题面（抽取/点击同链保证 nth 一致）→ `core.ai.router` 文本作答（题干空走整页截图兜底）→ 字母/判断映射真实点击填答（fill 走快照 textbox ref、essay 留空）→ 快照定位提交 + 确认 + 得分解析；`dry_run` 纯跳过 / `grade_only` 填答不提交（模拟运行+真机验证模式）/ 提交间 60–120s 节奏 / 单节异常隔离。`video.py` 弹题升级三层链路（揭示法 → AI 兜底 → hint 工单）。`api.py`：VALID_PHASES 补 `solve_quiz`、**solve_only 语义修正为仅答题跳过视频**（原为 full 别名遗留缺陷）、`--grade-only`/`--dry-run` 旗标贯通。能力矩阵翻转 `platforms.ts` solveOnly 开放。单测 +18（tests/platforms/zhihuishu/test_zhihuishu_quiz.py）。
+- **真机验证（grade-only 填答不提交授权下）**：止步登录——storageState 过期（57 Cookie 恢复后校验失败）且现场无人扫码（QR 工单 180s 超时→密码兜底表单填写失败），未触及答题 DOM；另发现本机 `doubao.txt` 缺失、`deepseek.txt` 为占位密钥（AI 作答链路无真实密钥）。补验条件与复跑命令已写入 roadmap §7。本轮真机仍验证了 solve_only 模式分发与登录降级链行为符合设计。
+- **滑块专项收尾（P2-6）**：`docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md`——M0 实测 4/4 指纹拒绝复盘 + 参考方案复核，结论维持 hint 工单人工兜底，滑块自动化降级为「QR 失效时的后备专项」（重评触发条件成文）；roadmap D3 同步。
+- **回归**：pytest `tests/unit` **626 passed**（+5 采样）+ `tests/platforms` **32 passed**（+18 M4，平台套件为 CI 外本地补充）；前端 typecheck 0 错误 + vitest **63 passed**（+11 监督 +2 mock MEMORY）。文档：api.md v1.7 / architecture.md 监督+仪表+M4 章节 / roadmap v0.3 / 验证清单 `VALIDATION_AFTER_P1_SUPERVISION_M4_2026-09-13.md`。
+
 ## 2026-09-13（续）— 真机联测观察项清偿：监视线程兜底 / 工单倒计时 NaN / mock 工单 accountId / 空闲态测量回退
 
 - **MemoryMonitor 线程兜底（core/memory.py）**：`run()` 采样异常从只捕 `MemorySamplerError` 改为捕获 `Exception` 统一降级（跳过本轮 + WARN）——真机多 Chrome 进程时 CIM 查询可超 20s 抛 `subprocess.TimeoutExpired`（不属 `MemorySamplerError`），原实现监视线程直接死亡、后续 MEMORY 事件与急停判定全部失效；gate 的采样自带 fail-open 不受影响。新增 `test_monitor_thread_survives_sampler_exception`（首轮抛 TimeoutExpired → 线程存活并继续发事件）。
