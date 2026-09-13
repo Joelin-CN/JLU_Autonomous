@@ -22,12 +22,15 @@
 | [standards/directory.md](standards/directory.md) | 目录规范：什么放哪里 + 多平台目标布局 |
 | [standards/documents.md](standards/documents.md) | 文件规范：命名 / 归档 / 文档同步义务 |
 | [standards/secrets.md](standards/secrets.md) | 凭据红线：入库禁令与泄露应急 |
-| [roadmap/zhihuishu.md](roadmap/zhihuishu.md) | 智慧树支持路线图（调研未开始） |
-| [design/architecture.md](design/architecture.md) | 架构概览 |
-| [design/api.md](design/api.md) | 前后端完整 API 契约（三层协议） |
+| [roadmap/zhihuishu.md](roadmap/zhihuishu.md) | 智慧树支持路线图（M0–M3 已落地，M4 答题进行中；含 ADR D2–D6） |
+| [design/architecture.md](design/architecture.md) | 架构全景（core/ + platforms/ 多平台布局 + 智慧树链路要点） |
+| [design/api.md](design/api.md) | 前后端完整 API 契约（三层协议，含 platform 路由） |
 | [design/integration.md](design/integration.md) | 前后端整合细节与运行约定 |
 | [design/reference/API_REFERENCE.md](design/reference/API_REFERENCE.md) | Python/JS/CLI 三层内部接口参考 |
 | [design/auto-solution-design.md](design/auto-solution-design.md) | 自动答题方案设计 |
+| [reports/analysis/ZHIHUISHU_REFS_2026-09-12.md](reports/analysis/ZHIHUISHU_REFS_2026-09-12.md) | 智慧树 M0 调研：第三方参考矩阵（11 GitHub + 4 油猴） |
+| [reports/analysis/ZHIHUISHU_ANALYSIS_2026-09-12.md](reports/analysis/ZHIHUISHU_ANALYSIS_2026-09-12.md) | 智慧树 M0 调研：Q1–Q8 实证与选择器交叉确认清单 |
+| [validation/VALIDATION_AFTER_ZHIHUISHU_M1M2_2026-09-12.md](validation/VALIDATION_AFTER_ZHIHUISHU_M1M2_2026-09-12.md) | 智慧树 M1/M2 验证清单（平台抽象 + 登录/扫描链路） |
 
 ## 归档规则
 

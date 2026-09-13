@@ -4,6 +4,22 @@
 
 前端通过 Electron 主进程将操作转发给独立的 Python 后端（Playwright 浏览器自动化 + AI 答题）。纯浏览器环境下自动切换到 Mock 模式，无需后端即可开发调试 UI。
 
+## 多平台架构（M1 起逐步落地）
+
+后端为 `core/` + `platforms/{chaoxing,zhihuishu}/` 布局（见 `../backend/README.md`）。前端遵循
+**平台无关原则**（`docs/standards/directory.md` §3）：平台差异只通过数据模型的 `platform` 字段
+与 IPC 参数表达，渲染层不引入平台分支逻辑。当前贯通位：
+
+- `electron/types.ts`：`Platform = 'chaoxing' | 'zhihuishu'`；`StartJobPayload.platform` /
+  `ScanCoursesPayload.platform`（缺省 chaoxing）
+- `electron/python/pythonBridge.ts`：按 platform spawn `python -m platforms.<platform>.api`，
+  注入 `ZHIHUISHU_ACCOUNTS_FILE` / `ZHIHUISHU_HEADED`；会话 `{platform}-chrome-{N}`
+- `accounts:default-path`：按平台返回 `passwords/<platform>.txt`
+- NDJSON 事件协议（8 类型）平台无关；智慧树扫码登录工单以 `type:'captcha'` +
+  `imageBase64` + `timeoutSeconds` 字段组合表达
+
+> 渲染层（preload / store / 视图）的平台切换 UI 与账号/课程分桶正在前端多平台 PR 中推进。
+
 ## 技术栈
 
 | 层 | 技术 |

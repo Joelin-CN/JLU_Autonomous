@@ -2,6 +2,17 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-12（续五）— 文档债务清偿：多平台架构全量同步（不含代码）
+
+- **api.md v1.5**：补 `StartJobPayload.platform` / `ScanCoursesPayload.platform`、spawn 路由（`platforms.<platform>.api|accounts|courses`）、`ZHIHUISHU_ACCOUNTS_FILE` / `ZHIHUISHU_HEADED` env 白名单、`accounts:default-path` 按平台返回、NDJSON 8 事件**无 breaking change** 声明；注明渲染层 preload 平台透传未合入 main 的现状。
+- **architecture.md v2.0**：从 2026-06 单包全景重写为 core/ + platforms/{chaoxing,zhihuishu} + chaoxing/ 垫片多平台布局；新增智慧树链路要点（storageState 免扫码、三弹窗自动化、D6 原速、弹题答案揭示、锁课红线）；移除已删的 DeepSeek Web 详图与个人课程状态表。
+- **frontend/docs/API_SPEC.md**：对照 main preload 实际签名同步 platform 字段。
+- **根 README**：智慧树矩阵改分项实况（登录/扫描 ✅、视频 ✅、答题 M4 🚧、滑块专项 🚧）。
+- **AGENTS.md v0.3**（代理规范单一事实源）：目录树 backend 行与后端入口更新为多平台布局；智慧树概况同步。
+- **backend/README.md**：双平台简介、`platforms.*` 入口示例、`zhihuishu.txt` 凭据格式、core/platforms 结构树。**frontend/README.md**：多平台架构贯通位说明。
+- **docs/README.md**：登记两份 M0 调研报告与 M1/M2 验证清单；roadmap 描述更新。
+- 范围约定：仅描述已合入 main 的能力；「JLU 学习助手」品牌与渲染层平台切换 UI 随前端多平台 PR（#3）文档同步，不在本 PR 抢跑。
+
 ## 2026-09-12（续四）— 前端多平台 UI 重构：品牌通用化 + 平台一级维度 + 工单三形态
 
 - **品牌通用化**：全部「超星助手 / Chaoxing Assistant」文案与标识改为「**JLU 学习助手**」（App 壳/侧栏/窗口标题/系统通知/index.html/`productName`/`appId→cn.edu.jlu.assistant`/`package.json name`）；`APP_NAME` 改 `jlu-study-assistant`（打包 userData 一次性 rename 迁移，开发模式不受影响）；localStorage key 迁移 `chaoxing-assistant-settings → jlu-study-assistant-settings`（读旧写新删旧）；接口名 `ChaoxingApi → AppApi`；图标暂沿用（无设计资源）。
