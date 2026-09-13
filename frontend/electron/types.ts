@@ -70,6 +70,8 @@ export interface JobLaneStatus {
 export interface JobStatus {
   jobId: string
   status: 'running' | 'paused' | 'completed' | 'stopped' | 'error'
+  /** 本次任务所属平台（job:start 时记录）。 */
+  platform?: Platform
   phase: JobPhase
   progress: number
   message?: string
@@ -96,6 +98,8 @@ export interface MemoryPlan {
 export interface PythonMemoryEvent {
   type: 'MEMORY'
   jobId?: string
+  /** 主进程转发时按槽位平台注入（后端 MEMORY 事件为进程级快照，不带平台）。 */
+  platform?: Platform
   budgetGB: number
   projectChromeGB: number
   perAccountAvgGB: number
@@ -105,6 +109,23 @@ export interface PythonMemoryEvent {
 }
 
 export type MemoryEvent = PythonMemoryEvent
+
+/**
+ * 主进程内存监督（策略 C）推送到渲染层的状态事件。
+ * 只在介入（engaged）时推送；armed（监督开启未触发）不推送，避免噪音。
+ */
+export interface MemorySupervisionEvent {
+  type: 'MEMORY_SUPERVISION'
+  state: 'armed' | 'engaged'
+  systemUsedGB: number
+  /** 介入阈值 = systemLimitGB − margin（默认 1GB）。 */
+  thresholdGB: number
+  systemLimitGB: number
+  /** 被监督暂停的平台（engaged 时必有）。 */
+  platform?: Platform
+  at: string
+  message: string
+}
 
 export interface StartJobPayload {
   /** 目标平台（默认超星）。决定后端入口 platforms.<platform>.api 与凭据文件。 */
@@ -137,6 +158,8 @@ export interface JobControlPayload {
  * for that account instead. Exactly one of the two is meaningful.
  */
 export interface ResolveTicketPayload {
+  /** 工单所属任务（双平台并行时按它路由到对应 bridge；缺省回落唯一活跃槽）。 */
+  jobId?: string
   ticketId: string
   accountId: number
   answer?: string
@@ -146,6 +169,7 @@ export interface ResolveTicketPayload {
 export interface ScanCoursesPayload {
   accountIds: number[]
   courseIds?: string[]
+  platform?: Platform
 }
 
 export interface Settings {
@@ -204,6 +228,10 @@ export interface Ticket {
   title: string
   message: string
   imageBase64?: string
+  /** 等待上限（秒）——智慧树扫码登录工单自带；渲染层倒计时优先读它。 */
+  timeoutSeconds?: number
+  /** 主进程转发时按当前任务平台注入（后端 TICKET 事件本身不携带）。 */
+  platform?: Platform
   options?: string[]
   resolved: boolean
   resolution?: string
@@ -214,6 +242,8 @@ export interface Ticket {
 export interface PythonProgressEvent {
   type: 'PROGRESS'
   jobId: string
+  /** 主进程转发时按槽位平台注入（后端事件本身不携带）。 */
+  platform?: Platform
   percent: number
   message: string
   phase?: string
@@ -225,6 +255,8 @@ export interface PythonProgressEvent {
 export interface PythonLogEvent {
   type: 'LOG'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   level: 'debug' | 'info' | 'warn' | 'error'
   message: string
   timestamp: string
@@ -233,6 +265,8 @@ export interface PythonLogEvent {
 export interface PythonPhaseEvent {
   type: 'PHASE'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   phase: JobPhase
   fromPhase?: JobPhase
   phaseIndex?: number
@@ -247,12 +281,16 @@ export interface PythonTicketEvent {
 export interface PythonResultEvent {
   type: 'RESULT'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   data: unknown
 }
 
 export interface PythonErrorEvent {
   type: 'ERROR'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
   error: string
   stack?: string
   phase?: JobPhase
@@ -262,6 +300,8 @@ export interface PythonErrorEvent {
 export interface PythonDoneEvent {
   type: 'DONE'
   jobId: string
+  /** 主进程转发时按槽位平台注入。 */
+  platform?: Platform
 }
 
 export type PythonBridgeEvent =
@@ -343,5 +383,6 @@ export const IPC_CHANNELS = {
   ON_ERROR: 'on-error',
   ON_RESULT: 'on-result',
   ON_MEMORY: 'on-memory',
+  ON_MEMORY_SUPERVISION: 'on-memory-supervision',
   SYSTEM_VALIDATE_PYTHON: 'system:validate-python',
 } as const

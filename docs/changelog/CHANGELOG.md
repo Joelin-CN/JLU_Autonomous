@@ -2,6 +2,68 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-14 — E2E 轮 1（真实前端按钮）：全链路通 + 抓修 3 个渲染层缺陷
+
+- **E2E（智慧树「仅刷题」+ 模拟运行，真实账号）**：按钮 → spawn → 课程过滤 → solver → DeepSeek 逐题视觉作答 → 草稿 9/10 未提交；已交卷/列表页形态优雅跳过；整单 solved 1/skipped 5/failed 0。前置全链路审核报告：`docs/reports/analysis/E2E_AUDIT_M4_CHAIN_2026-09-14.md`。
+- **E2E 抓到并修复 3 缺陷**（4691bad5/9bb3e9d8）：智慧树 argparse 缺 `--courses`（选中课程启动即 SystemExit）；`_map_course` 缺 `id` 字段（渲染层 id="undefined" → 过滤静默清空课程、答题段被跳过）；`progress` "2%" 字符串直传（课程卡 NaN%）。
+- **新已知问题**：选项「读取-点击」竞态（读字母后 DOM 重排致点击落错，选中校验捕获；待改按内容点击）。
+- 门禁：pytest `tests/platforms` **45 passed**（+3 课程映射）。轮 2（真实提交版）待 PR #6 合入后执行。
+
+## 2026-09-13（续五）— M4 填空题支持 + 真实提交链路验证：绪论单元测试满分 20/20
+
+- **填空题支持**：无选项题（此前会触发「不可见或无选项」中断整卷）按题型分流——fill 走「截图题干 → DeepSeek 视觉 → sanitize_fill_text（首行/限长 500）→ 题块内 textarea/可见 input 填写（locator.fill 真实输入）」；essay 仍留空。单测 +3。
+- **真实提交链路（用户授权）**：绪论单元测试真实提交——草稿完整存活，submit_exam（.btn 族定位回退 + 确认弹窗回退）成功，**成绩弹窗 20 分（满分，DeepSeek 作答 10/10 全对，vision 确认）**。附带修复 parse_score：成绩弹窗模式优先（通用「N分」误匹配题目标记「(2分)」）。
+- 门禁：pytest `tests/platforms` **40 passed**（+3 填空 +1 成绩模式）。
+
+## 2026-09-13（续四）— M4 用户复核收口：多选确定钮 / 选中态双信号 / 末题暂存 / 扫码即导出
+
+- **触发**：用户复核绪论测试草稿发现「部分题未勾选」。DOM 只读巡检 + vision 截图交叉定位三个真缺陷：多选（checkbox）选项点击后不点题块内「确定」就翻页，选择整卷丢弃（两道多选草稿全空而单选/判断正常）；末题无「下一题」致答案不保存；**选中校验读 input.checked 是错信号**——新点击只改 Vue 组件态（换 img 图标渲染选中），原生 radio 不同步（vision 实证：视觉已选中而 checked=false）。
+- **修复**（115e4e05 / 18bd0ea6）：多选点完字母点题块内「确定」；`read_selections` 双信号（input.checked OR 题内图标少数派）+ 读失败 None/空表区分（防守护进程抖动假阴性误补点）；末题收尾点「暂存作业」（定位器 getByRole→.btn 族回退 + 重试，只存草稿不交卷，仍属「填答不提交」）；`_solve_section` 状态串计账修双计。另修扫码成功跳转后校验竞态：立即导出 storageState（校验失败不浪费扫码）+ 校验重试（c9dda3d8）。
+- **终态（DOM+vision 双确认）**：绪论单元测试草稿 **10/10 题已答、完成率 100%、未提交**——含两道多选与末题；等用户人工核对后接管提交。门禁：pytest `tests/platforms` 37 passed（unit 626 不受影响）。
+
+## 2026-09-13（续三）— M4 真机全链路验证通过：DeepSeek 迁移 + 试卷页层按真机 DOM 重构
+
+- **DeepSeek 迁移**：真实密钥自老项目迁入 `data/passwords/deepseek.txt`（git 忽略），移除 doubao.txt，`chaoxing_config.json`（git 忽略真实配置）`ai.provider` 切 `deepseek-api`；文本冒烟 2/2 全对。
+- **M4 真机验证（grade-only 填答不提交，用户现场扫码）**：绪论单元测试 **10/10 题**全链路——登录态复用 → 章测入口 → 试卷新标签页 → 逐题「DOM 读题型/选项 + 截图加密题干 → DeepSeek 视觉作答 → 内容映射字母 → 真实点击 → 下一题存草稿」→ **未提交未暂存**；判断/单选/多选全覆盖（多选 BD/CD 两连正确）；其余 5 章测入口因视频未完成按设计跳过；整单 success。证据：`data/logs/m4v11.log` + `data/temp/zhs_quiz_q1-10.png`。
+- **真机驱动的修复（8–11 轮迭代）**：AI 入参结构对齐 `{index,question,options}`（34d43385）；RunConfig 生产构造不传 mode 致答题分支永不执行→双向自洽（944de7c0）；章测点击 `.name` 内层元素 + 前置清「课程提醒」；试卷在**新标签页** stuExamWeb——试卷操作全部改在 exam page 对象上执行；**题干加密渲染**（DOM 空文本/屏幕可见）→ 截图→AI 视觉为标准路线；末题「下一题」禁用时 `text=` 命中提示文案死循环 → getByRole('button') + 屏幕题号防循环守卫；选项字母锚定正则被空白失配 → `.mr10` span 精确过滤；试卷操作非法输出带出真实原因（e4f82e59）。
+- **回归**：pytest `tests/unit` **626 passed** + `tests/platforms` **37 passed**（M4 +3：map_answer_to_letters / judge_answer_text 语义化）；前端 typecheck 0 错误 + vitest **63 passed**。文档：验证清单 P1-6/P1-6a/P2-3 更新、roadmap M4 状态翻转。
+
+## 2026-09-13（续二）— P1 增量收尾 + 智慧树 M4 答题落地：内存监督 / 预算仪表 / CIM 采样提速 / CI 触发 / M4 solver / 滑块专项
+
+- **CI 触发修复（.github/workflows/ci.yml）**：`pull_request` 补 `types: [opened, synchronize, reopened, edited]`——默认 types 不含 edited，PR 改基分支后 required checks 不重跑（上一会话被迫空提交触发）。workflow 改动在本 PR 自身不生效（GitHub 限制），合入 main 后生效。
+- **CIM 采样性能（core/memory.py，报告 `docs/reports/fixes/MEMORY_FIX_2026-09-13.md`）**：`measure_project_chrome_gb` 三层优化——PS 脚本头部 `Get-Process` 粗筛快路径（无 chrome 直接输出 0 完全跳过 CIM，空闲态采样 20s 级 → 亚秒级）+ CIM `-Property WorkingSetSize,CommandLine` 属性投影（降低多进程编组开销）+ 模块级 TTL(2s) 缓存按 profile_root 键控（去重 Monitor 与 gate 并发查询；失败不缓存；`_clear_measure_cache` 测试钩子）。前端 planner.ts 同款脚本镜像前两层。单测 +5。
+- **内存监督（策略 C，electron）**：决策纯函数 `memory/supervision.ts`（不 import electron，vitest +11）——`systemUsedGB ≥ systemLimitGB − 1GB` 预警线时对占用较大平台槽位发暂停指令、60s 冷却、不决策恢复；服务 `memory/supervisor.ts` 10s 自测 + MEMORY 事件喂入 → 介入时整任务暂停（与手动暂停同路径）+ 系统 Notification + `on-memory-supervision` 推送（additive 协议增量，mock 不模拟）；测量失败跳过、无槽位自动停表、用户手动继续清介入标记。渲染层 memory.store 增 supervision 状态。
+- **执行页分平台预算仪表**：`BudgetGauge` 增 compact 横条变体，每个平台分组（运行/暂停态）在 banner 下渲染，消费 `memory.store.planFor/latestFor`；监督介入提示条仅 engaged 时显示。mock 层补齐：`onMemory` 真实监听 + `simulateJob` 每 tick 合成 MEMORY（口径对齐后端）+ handle 附分账 memoryPlan（迷你 allocateBudget，双平台 13.5→0.7 下限）；`execution.store.startJob` 即写 setPlan。测试 +2；UI 双确认（dev mock 双任务分屏截图 + vision 审查）布局无缺陷、分账差异正确呈现。
+- **智慧树 M4 答题求解落地**：新 `platforms/zhihuishu/solvers/quiz.py`（架构对齐超星 quiz solver 瘦身版）——章树真实点击 `li.chapter-test` → 只读 JS 抽取题面（抽取/点击同链保证 nth 一致）→ `core.ai.router` 文本作答（题干空走整页截图兜底）→ 字母/判断映射真实点击填答（fill 走快照 textbox ref、essay 留空）→ 快照定位提交 + 确认 + 得分解析；`dry_run` 纯跳过 / `grade_only` 填答不提交（模拟运行+真机验证模式）/ 提交间 60–120s 节奏 / 单节异常隔离。`video.py` 弹题升级三层链路（揭示法 → AI 兜底 → hint 工单）。`api.py`：VALID_PHASES 补 `solve_quiz`、**solve_only 语义修正为仅答题跳过视频**（原为 full 别名遗留缺陷）、`--grade-only`/`--dry-run` 旗标贯通。能力矩阵翻转 `platforms.ts` solveOnly 开放。单测 +18（tests/platforms/zhihuishu/test_zhihuishu_quiz.py）。
+- **真机验证（grade-only 填答不提交授权下）**：止步登录——storageState 过期（57 Cookie 恢复后校验失败）且现场无人扫码（QR 工单 180s 超时→密码兜底表单填写失败），未触及答题 DOM；另发现本机 `doubao.txt` 缺失、`deepseek.txt` 为占位密钥（AI 作答链路无真实密钥）。补验条件与复跑命令已写入 roadmap §7。本轮真机仍验证了 solve_only 模式分发与登录降级链行为符合设计。
+- **滑块专项收尾（P2-6）**：`docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md`——M0 实测 4/4 指纹拒绝复盘 + 参考方案复核，结论维持 hint 工单人工兜底，滑块自动化降级为「QR 失效时的后备专项」（重评触发条件成文）；roadmap D3 同步。
+- **回归**：pytest `tests/unit` **626 passed**（+5 采样）+ `tests/platforms` **32 passed**（+18 M4，平台套件为 CI 外本地补充）；前端 typecheck 0 错误 + vitest **63 passed**（+11 监督 +2 mock MEMORY）。文档：api.md v1.7 / architecture.md 监督+仪表+M4 章节 / roadmap v0.3 / 验证清单 `VALIDATION_AFTER_P1_SUPERVISION_M4_2026-09-13.md`。
+
+## 2026-09-13（续）— 真机联测观察项清偿：监视线程兜底 / 工单倒计时 NaN / mock 工单 accountId / 空闲态测量回退
+
+- **MemoryMonitor 线程兜底（core/memory.py）**：`run()` 采样异常从只捕 `MemorySamplerError` 改为捕获 `Exception` 统一降级（跳过本轮 + WARN）——真机多 Chrome 进程时 CIM 查询可超 20s 抛 `subprocess.TimeoutExpired`（不属 `MemorySamplerError`），原实现监视线程直接死亡、后续 MEMORY 事件与急停判定全部失效；gate 的采样自带 fail-open 不受影响。新增 `test_monitor_thread_survives_sampler_exception`（首轮抛 TimeoutExpired → 线程存活并继续发事件）。
+- **扫码工单倒计时 NaN:NaN（双端修复）**：智慧树扫码/滑块工单此前不带 `createdAt`（超星由 content handlers 盖章，智慧树漏了）→ 渲染层 `new Date(undefined).getTime()`=NaN。智慧树 `_screenshot_ticket` 补 ISO-毫秒-UTC 盖章；渲染层 `mapElectronTicket` 新增 `_parseEpochMs` 兜底（createdAt 解析失败回落当前时刻，resolvedAt 同修）。
+- **mock 演示工单 accountId 数字化**：mock 账号 id 为 `acct_*` 字符串，演示验证码工单透传导致 `parseAccountId` 报错文字压按钮——改为可解析数字（非数字回落 `0`），并行测试补 `Number.isInteger` 断言。
+- **electron 空闲态测量回退（memory/planner.ts）**：`measureProjectChromeGB` 的 PS 脚本无 `$null→0` 守卫（后端同款脚本有），无项目 Chrome 时输出空串被当探针失败 → job:start 基线测量整块回退 os 估计。补守卫后空闲态走真实系统测量。
+- **回归**：pytest **621 passed**（+1 监视线程存活）；前端 typecheck 0 错误 + vitest **50 passed**（演示工单断言增强）。
+
+## 2026-09-13 — 真机双 Python 进程联测（占位账号）：分账/闸门/并行全验证 + 三处当场修复
+
+- **联测结论（T1/T2/T3 三层，真实账号零学习操作）**：①生产 `allocateBudget`+真实测量断言分账不变式；②直接双进程探针（预算 0.3GB<0.7 单实例）验证**闸门永不放行、零浏览器打开**、双路 MEMORY 事件、STOP 干净退出；③Electron 全链路（computer-use 驱动真实窗口，占位账号经 `ZHIHUISHU_ACCOUNTS_FILE` 重定向）：智慧树先启独跑 `--budget-gb 9.83`，超星后启**并行放行**拿最低保障 `--budget-gb 0.70 --max-concurrent 1`（动态剩余分账），且超星闸门被智慧树的全局占用挡住——智慧树停止后**立即放行**开浏览器（闸门动态跟随）；双 banner 并存，分组停止后 python 进程清退。
+- **联测暴露并当场修复 3 处**：①智慧树 argparse 丢 `--job-id/--accounts`（前日补内存参数的编辑误删；pytest/mock 均不可见，唯真机 spawn 暴露——已修 + 新增 `test_cli_argparse_smoke.py` 2 例防回归契约测试）；②智慧树协议处理器缺 `MEMORY` 分支（监视器事件被静默丢弃——补齐后 T2 双平台各 3×MEMORY）；③`accounts:list` 空参数（智慧树 accounts 子命令 `command` 必填 → 真实模式智慧树账号列表一直拉不到——显式传 `list`）。
+- **回归**：pytest **620 passed**（618+2 冒烟）；typecheck 0 错误。
+- **新观察项（记档未修）**：`core/memory.py` MemoryMonitor 线程无异常兜底（多 Chrome 时 CIM 采样 20s 超时→监视线程死亡，gate 采样 fail-open 不受影响，建议后续加 try/except 降级）；扫码工单倒计时 `NaN:NaN`；占位联测需先移开共享 profile 的 `storage-state.json`（本轮首轮曾恢复旧 Cookie 做登录态验证，未做任何学习操作即停止，文件已测后还原）。
+- 文档：验证清单补 P0-8~P0-12 真机联测条目与记录。
+
+## 2026-09-12（续六）— 双平台并行任务执行（后端编排 + 渲染层多任务）
+
+- **同平台互斥、跨平台并行**：Electron 主进程从全局单任务（`activeJobId` + 单 `bridge`）重构为 **per-platform 槽位表**（`ipc/jobSlots.ts` 纯逻辑模块，vitest 可测）：`job:start` 按平台判占用（另一平台任务不阻塞）；pause/resume/stop/resolve-ticket 按 `jobId` 路由到对应槽位 bridge；进程 done/exit 经 `releaseIfCurrent` 身份守卫释放槽位（防旧进程迟到事件误清）；应用退出 `stopAllJobs()` 遍历全部槽位。IPC 通道名与 NDJSON 8 事件协议不变。
+- **内存动态剩余分账（策略 B）**：`memory/planner.ts#allocateBudget`——独跑拿全额预算（现状不变）；后启任务份额 = `clamp(全局预算 − 其他平台已授予, 最低保障 1 账号, 全局预算)`，`--max-concurrent` 按份额重算；授予额允许受控超卖，但两平台 Python 闸门实测全局 Chrome 占用（profile 同根）天然收敛，`--system-limit-gb` 恒全机值两进程共用 fail-closed 急停线——**总占用不超单机预算红线可守**。
+- **智慧树内存治理补齐（修存量崩溃 bug）**：此前 `job.handler` 对所有平台无条件传 `--max-concurrent/--budget-gb/...`，而智慧树 argparse 未定义 → UI 启动智慧树任务直接 SystemExit(2)。现 `platforms/zhihuishu/api.py` 补 4 个内存参数并挂 `core.memory` 的 gate/monitor 钩子（`core.orchestrator` 一行不动，平台层 ~25 行接线），智慧树获得与超星同构的预算闸门。
+- **事件 platform 盖章 + 工单路由**：8 类事件主进程转发时统一注入 `platform`（additive）；`job:resolve-ticket` 载荷新增可选 `jobId`（双任务时路由到对应平台进程，缺省回落唯一活跃任务，不透传 Python）；`closeBrowserSessions` 调用点补传 `job.platform`（修「停智慧树任务误关超星会话」存量 bug）；`jobState.isJobActive(platform?)` 派生自槽位表——账号增删改按平台锁，设置/AI 配置全局锁。
+- **渲染层多任务化**：`execution.store` 槽位化（`Record<Platform, Slot>` 各持 jobId/lanes/phases/计时，事件按 `event.jobId` 路由；任务完成课程回读带任务自己的平台，修课程桶错读）；执行页按平台分组双 banner（各自控制按钮/统计）；侧栏运行中**允许**切换平台（数据分桶使切换安全）；课程总览启动按钮改「同平台运行中」禁用；`memory.store` 按平台分桶；ipcClient 单 `currentHandle` → 按 jobId Map（platform 回填不再串）；mock 层单仿真 → `simulations Map`（同平台替换/跨平台并存，事件带 jobId+platform）。
+- **验证**：后端 `pytest tests/unit` **618 passed**；前端 typecheck 0 错误 + vitest **50 passed**（新增 jobSlots 槽位 6 例 / allocateBudget 分账 5 例 / mockClient 双任务生命周期 4 例 / execution.store 双槽路由 4 例）；dev mock 双确认：双 banner 分组渲染、组内暂停/继续独立生效（暂停智慧树组不影响超星组）、运行中切平台、超星验证码 + 智慧树扫码工单分别弹出、完成回读日志带平台标签——视口截图经 vision 分析无布局缺陷。文档：api.md v1.6 / architecture.md 并行执行章节 / 验证清单。
+
 ## 2026-09-12（续五）— 文档债务清偿：多平台架构全量同步（不含代码）
 
 - **api.md v1.5**：补 `StartJobPayload.platform` / `ScanCoursesPayload.platform`、spawn 路由（`platforms.<platform>.api|accounts|courses`）、`ZHIHUISHU_ACCOUNTS_FILE` / `ZHIHUISHU_HEADED` env 白名单、`accounts:default-path` 按平台返回、NDJSON 8 事件**无 breaking change** 声明；注明渲染层 preload 平台透传未合入 main 的现状。
@@ -12,6 +74,15 @@
 - **backend/README.md**：双平台简介、`platforms.*` 入口示例、`zhihuishu.txt` 凭据格式、core/platforms 结构树。**frontend/README.md**：多平台架构贯通位说明。
 - **docs/README.md**：登记两份 M0 调研报告与 M1/M2 验证清单；roadmap 描述更新。
 - 范围约定：仅描述已合入 main 的能力；「JLU 学习助手」品牌与渲染层平台切换 UI 随前端多平台 PR（#3）文档同步，不在本 PR 抢跑。
+
+## 2026-09-12（续四）— 前端多平台 UI 重构：品牌通用化 + 平台一级维度 + 工单三形态
+
+- **品牌通用化**：全部「超星助手 / Chaoxing Assistant」文案与标识改为「**JLU 学习助手**」（App 壳/侧栏/窗口标题/系统通知/index.html/`productName`/`appId→cn.edu.jlu.assistant`/`package.json name`）；`APP_NAME` 改 `jlu-study-assistant`（打包 userData 一次性 rename 迁移，开发模式不受影响）；localStorage key 迁移 `chaoxing-assistant-settings → jlu-study-assistant-settings`（读旧写新删旧）；接口名 `ChaoxingApi → AppApi`；图标暂沿用（无设计资源）。
+- **平台一级维度（修 PR #3 三层断点）**：新增 `platform.store`（全局 `currentPlatform`，localStorage 持久化）+ 侧栏品牌区下方全局切换器（运行中禁切）+ 头部当前平台徽标 + 侧栏 footer 双平台状态行；撤销课程图谱页 view-local Tab。**账号/课程数据按平台分桶**（`Record<Platform, Account[]>` 与 `platform:accountId` 复合键，两平台行号不再互撞）；electron 主进程 `accounts:list` / `courses:scan` / `courses:list` / `accounts:add|edit|remove` 修复为消费已声明的 platform 参数（此前硬编码 chaoxing，切换器「看起来支持、数据仍是超星」）——不改任何 IPC 通道名。
+- **能力矩阵驱动**：新增 `shared/lib/platforms.ts`（`PLATFORM_META` 徽标元数据 + `PLATFORM_CAPABILITIES`）；课程图谱任务按钮组按矩阵显隐/置灰——智慧树「全自动（视频）」文案、仅刷题/仅内容置灰并带「M4 开发中」tooltip；设置页账号表单「登录网址」字段仅超星显示；`passport2.chaoxing.com` 硬编码特判改平台注册表 `defaultLoginHost`。
+- **工单三形态**：渲染层 `Ticket` 增 `timeoutSeconds` / `platform` / 判别 `kind`（`captcha` 输入型 / `qrcode` 扫码型 / `hint` 提示型），`mapElectronTicket` 透传新字段并按后端字段组合判别形态（扫码=图+timeoutSeconds；滑块=无图 captcha）；CaptchaModal 三形态（扫码型二维码大图+per-ticket 倒计时+扫码后自动继续，提示型文字+URL linkify）；主进程转发 `on-ticket` 时注入任务平台；关注队列加工单平台 tag + 平台过滤 pill + 申诉链接可点击。
+- **视图与 mock**：仪表盘统计卡/账号点阵按平台分组（AI 余额卡保留全局）；执行页 banner 平台徽标；设置页账号面板平台 Tab（可分别管理两平台账号，路径 per-platform）；`maskPhone` 四份本地拷贝统一为 `shared/lib/mask.ts maskLogin`（学号等非手机号登录通用掩码）；mock 层按平台生成数据（超星手机号+mooc1 / 智慧树学号+onlineweb）并覆盖三形态工单，`__popCaptcha(kind)` DEV 钩子支持注入三形态。
+- **验证（视觉+DOM 双确认）**：dev 模式 10 项交互流全部通过（切平台→账号列表换学号→按钮降级→扫码/滑块/输入工单弹出→平台持久化→旧 key 迁移删除），4 张截图经 vision 分析无阻塞缺陷；`npm run typecheck` 双 project 绿；vitest **31 passed**（新增 platforms 注册表/classifyTicketKind/settings 迁移/captcha 超时/mock 平台路由 5 组）；后端 `pytest tests/unit` 不回归。存量观察项（点阵图例色差、统计卡密度、工单平台 tag 图标）记录于 PR。
 
 ## 2026-09-12（续三）— M3 视频全链路实测通过（0.1 节 456/456s，全程无人值守）
 

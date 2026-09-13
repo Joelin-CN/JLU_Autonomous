@@ -1,9 +1,12 @@
 // ── Mock Data Generator ──
-// Generates realistic Chinese university (超星学习通) data for frontend development
+// Generates realistic Chinese university data for frontend development,
+// per platform: chaoxing (超星学习通, phone logins / mooc1 URLs) and
+// zhihuishu (智慧树, student ids / onlineweb URLs / QR-login tickets).
 
 import type {
   Account,
   Course,
+  Platform,
   SectionDef,
   Ticket,
   StartJobPayload,
@@ -72,17 +75,22 @@ const CHAPTER_TEMPLATES: Record<string, { chapters: string[]; sections: Record<s
 
 // ── generators ──
 
-export function generateMockAccounts(count = 8): Account[] {
+export function generateMockAccounts(count = 8, platform: Platform = 'chaoxing'): Account[] {
   const accounts: Account[] = []
   const statuses: AccountStatus[] = ['online', 'online', 'online', 'online', 'online', 'offline', 'error', 'checking']
 
   for (let i = 0; i < count; i++) {
-    const phone = `1${randInt(30, 99)}${String(randInt(1000, 9999))}${String(randInt(1000, 9999))}`
+    // chaoxing logins are phone numbers; zhihuishu logins are student ids
+    // (2024xxxxxxx) — the mask layer handles both shapes.
+    const username = platform === 'zhihuishu'
+      ? `2024${String(randInt(100000, 999999))}`
+      : `1${randInt(30, 99)}${String(randInt(1000, 9999))}${String(randInt(1000, 9999))}`
     const name = pick(SURNAMES) + pick(GIVEN_NAMES)
     accounts.push({
       id: uid('acct'),
-      username: phone,
+      username,
       displayName: name,
+      platform,
       status: i < statuses.length ? statuses[i] : 'online',
       lastChecked: Date.now() - randInt(0, 3600000),
       errorMessage: i === 6 ? '登录凭证已过期，请重新登录' : undefined,
@@ -91,7 +99,7 @@ export function generateMockAccounts(count = 8): Account[] {
   return accounts
 }
 
-export function generateMockCoursesForAccount(accountId: string, count?: number): Course[] {
+export function generateMockCoursesForAccount(accountId: string, count?: number, platform: Platform = 'chaoxing'): Course[] {
   const n = count ?? randInt(4, 10)
   const courses: Course[] = []
   const used = new Set<number>()
@@ -114,7 +122,10 @@ export function generateMockCoursesForAccount(accountId: string, count?: number)
       totalSections,
       completedSections,
       accountId,
-      url: `https://mooc1.chaoxing.com/course/${uid('')}.html`,
+      platform,
+      url: platform === 'zhihuishu'
+        ? `https://onlineweb.zhihuishu.com/onlineStudy.html#/studyVideo?recruitAndCourseId=${uid('')}`
+        : `https://mooc1.chaoxing.com/course/${uid('')}.html`,
     })
   }
   return courses
@@ -152,24 +163,37 @@ export function generateMockSections(_courseId: string): SectionDef[] {
   return chapters
 }
 
-export function generateMockTickets(count?: number): Ticket[] {
-  const n = count ?? randInt(3, 8)
-  const templates = [
-    { title: '登录验证码需要手动处理', message: '账号 138****5678 登录时出现图形验证码，需要人工完成验证。', severity: 'warning' as const },
-    { title: '课程进度异常', message: '课程"大学英语(四)"已完成章节数与服务器记录不匹配，建议重新扫描。', severity: 'warning' as const },
-    { title: '视频播放速度警告', message: '课程"高等数学A"的视频播放速度超过平台限制，可能被检测为异常行为。', severity: 'critical' as const },
-    { title: '账号登录状态失效', message: '账号 159****2345 的登录Cookie已过期，需要重新登录。', severity: 'critical' as const },
-    { title: '测验答案置信度低', message: '"Python程序设计"第3章测验中的2道题目AI置信度低于60%，建议人工复核。', severity: 'info' as const },
-    { title: '任务队列堆积', message: '当前有5个任务等待执行超过10分钟，建议增加并发数或检查账号状态。', severity: 'warning' as const },
-    { title: '每日任务完成', message: '今日所有计划任务已执行完毕，共完成12门课程的32个章节学习。', severity: 'info' as const },
-    { title: '新课程检测到', message: '账号 177****8901 检测到2门新课程："大学语文"和"形势与政策"，已自动添加到课程列表。', severity: 'info' as const },
-  ]
+/** 工单模板按平台区分：超星是验证码/课程异常；智慧树是扫码登录（qrcode）、
+ *  滑块人工处理（hint）、课程锁定警告（含申诉链接）。 */
+const CHAOXING_TICKET_TEMPLATES = [
+  { title: '登录验证码需要手动处理', message: '账号 138****5678 登录时出现图形验证码，需要人工完成验证。', severity: 'warning' as const },
+  { title: '课程进度异常', message: '课程"大学英语(四)"已完成章节数与服务器记录不匹配，建议重新扫描。', severity: 'warning' as const },
+  { title: '视频播放速度警告', message: '课程"高等数学A"的视频播放速度超过平台限制，可能被检测为异常行为。', severity: 'critical' as const },
+  { title: '账号登录状态失效', message: '账号 159****2345 的登录Cookie已过期，需要重新登录。', severity: 'critical' as const },
+  { title: '测验答案置信度低', message: '"Python程序设计"第3章测验中的2道题目AI置信度低于60%，建议人工复核。', severity: 'info' as const },
+  { title: '每日任务完成', message: '今日所有计划任务已执行完毕，共完成12门课程的32个章节学习。', severity: 'info' as const },
+]
+
+const ZHIHUISHU_TICKET_TEMPLATES = [
+  { title: '智慧树扫码登录', message: '请使用智慧树 App 扫描二维码完成登录。', severity: 'critical' as const, kind: 'qrcode' as const, timeoutSeconds: 180 },
+  { title: '智慧树滑块验证', message: '检测到滑块验证，请前往浏览器窗口手动完成拖拽，完成后自动继续。', severity: 'critical' as const, kind: 'hint' as const },
+  { title: '课程锁定警告', message: '课程"马克思主义基本原理"已被平台锁定（考试模式），可前往申诉：https://onlineweb.zhihuishu.com/appeal/apply', severity: 'warning' as const },
+  { title: '视频进度同步延迟', message: '课程"大学英语(四)"的视频观看进度同步延迟，已自动重试。', severity: 'info' as const },
+  { title: '章节弹题检测', message: '章节"1.3 核心理论"出现弹题，当前以跳过策略处理（M4 答题求解开发中）。', severity: 'warning' as const },
+]
+
+export function generateMockTickets(count?: number, platform: Platform = 'chaoxing'): Ticket[] {
+  const templates = platform === 'zhihuishu' ? ZHIHUISHU_TICKET_TEMPLATES : CHAOXING_TICKET_TEMPLATES
+  const n = count ?? randInt(3, templates.length)
 
   return templates.slice(0, n).map((t) => ({
     id: uid('ticket'),
     title: t.title,
     message: t.message,
     severity: t.severity,
+    platform,
+    kind: 'kind' in t ? (t as { kind: Ticket['kind'] }).kind : undefined,
+    timeoutSeconds: 'timeoutSeconds' in t ? (t as { timeoutSeconds: number }).timeoutSeconds : undefined,
     resolved: Math.random() > 0.6,
     resolvedAt: Math.random() > 0.6 ? Date.now() - randInt(0, 86400000) : undefined,
     resolution: Math.random() > 0.6 ? '已手动处理完成' : undefined,
@@ -203,6 +227,7 @@ export function generateMockJobHandle(
   return {
     jobId: uid('job'),
     status: 'running',
+    platform: payload.platform ?? 'chaoxing',
     createdAt: Date.now(),
     startedAt: Date.now(),
     objective: payload.objective,

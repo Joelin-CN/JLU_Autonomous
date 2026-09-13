@@ -8,7 +8,7 @@
 
 ## 项目概况
 
-- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 全套；智慧树 🚧 建设中（登录/课程扫描 ✅、视频 ✅、答题 M4 与滑块自动求解进行中，见 `docs/roadmap/zhihuishu.md`）。项目范围仅此两个平台。
+- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 全套；智慧树 🚧 建设中（登录/课程扫描 ✅、视频 ✅、答题 M4 ✅ 真机验证过；滑块专项结论＝维持人工工单，见 `docs/roadmap/zhihuishu.md`）。项目范围仅此两个平台。
 - `frontend/`（Electron + Vue 3）与 `backend/`（Python 3.10+，Playwright 浏览器自动化 + AI 答题）在同一仓库。
 - 前端按 Electron 进程划分：`electron/`（主进程）/ `src/`（渲染进程，Vue 3 + Pinia）/ `src/shared/`（共享层）。
 - 后端按平台分包（M1 多平台架构）：`backend/core/`（平台无关层）+ `backend/platforms/{chaoxing,zhihuishu}/`（平台实现，入口 `python -m platforms.<platform>.api`，JSON-line 协议与 Electron 通信）+ `backend/chaoxing/`（兼容垫片，旧入口 `python -m chaoxing.api` 语义不变）。
@@ -116,6 +116,7 @@ JLU_Autonomous/
 - 提交前用 `git status` 确认只包含本次变更相关文件；`data/`、`references/` 内容不得入提交。
 - 涉及接口或架构变更时，先同步 `docs/design/` 对应文档。
 - AI 代理执行 git 写操作（add / commit / push）需在该管理者授权的分支范围内进行；合并到 `main` 只能通过 PR。
+- **分支边界红线（2026-09-13 起）**：AI 代理的一切改动只推送到当前授权的工作分支（如 `feature/parallel-platform-jobs`）。**未经管理者本人当次明确许可，禁止以任何方式改动 `main`**——包括但不限于：admin squash/merge、rebase/merge 到 `main`、临时关闭分支保护（`enforce_admins` / `allow_force_pushes`）后强推或合并。历史上的合并授权（哪怕同一会话内给过）**不延续**到后续操作，每次涉及 `main` 的动作必须单独确认；对「合并 PR」「把分支合起来」等指令有歧义时，先确认语义再动手。
 
 ## 验证驱动开发
 

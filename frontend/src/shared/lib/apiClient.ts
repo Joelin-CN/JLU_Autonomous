@@ -1,4 +1,4 @@
-import type { ChaoxingApi } from './types'
+import type { AppApi } from './types'
 import { ElectronApiClient } from './ipcClient'
 import { MockApiClient } from './mockClient'
 
@@ -15,15 +15,15 @@ export { stripInvokeErrorPrefix } from './ipcClient'
 // Every HMR reload of a store stacked yet another instance. That accumulation
 // was the frontend's own memory-management problem. Memoizing here collapses it
 // to a single shared client without changing the API surface or transport.
-let instance: ChaoxingApi | null = null
+let instance: AppApi | null = null
 
-export function createApiClient(): ChaoxingApi {
+export function createApiClient(): AppApi {
   if (instance) return instance
 
   if (typeof window !== 'undefined' && (window as any).electronAPI) {
     instance = new ElectronApiClient()
   } else {
-    console.info('[Chaoxing] Running in browser mode — using MockApiClient')
+    console.info('[App] Running in browser mode — using MockApiClient')
     instance = new MockApiClient()
   }
   return instance

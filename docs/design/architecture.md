@@ -482,3 +482,120 @@ chaoxing_cli.bat full-auto --all-accounts --headed
   当前生效账号文件（`CHAOXING_ACCOUNTS_FILE` 可覆盖路径），显式编号防止档案错位。
 - **任务运行中**锁定所有写操作（AI 配置、账号、账号路径），由主进程 `jobState`
   统一把关。
+
+---
+
+## 双平台并行任务执行（2026-09-12）
+
+从「全局单任务」升级为「**每平台一个执行槽位**：同平台互斥、跨平台并行」。
+
+### 编排层（Electron 主进程）
+
+- **槽位表** `electron/ipc/jobSlots.ts`：`Map<Platform, { jobId, bridge, grantedBudgetGB }>`，
+  纯逻辑（不 import electron，可单测）。`job:start` 的互斥从全局 `activeJobId` 改为
+  按平台判占用；pause/resume/stop/resolve-ticket 一律按 `jobId` 路由到对应槽位的
+  bridge；进程 done/exit 通过 `releaseIfCurrent(bridge)` 释放槽位（身份守卫防旧进程
+  迟到事件误清新任务槽位）。应用退出时 `stopAllJobs()` 遍历全部槽位走
+  STOP → SIGTERM → SIGKILL 升级链。
+- **内存动态剩余分账** `electron/memory/planner.ts#allocateBudget`：spawn 时本任务份额 =
+  `clamp(全局预算 − 其他平台已授予之和, 最低保障 1 账号, 全局预算)`，`--max-concurrent`
+  按份额重算，`--system-limit-gb` 恒为全机值。允许「授予额」受控超卖——两平台 Python
+  进程的 `gate_open` 实测的都是全局 Chrome 占用（profile 同根），实际内存天然收敛；
+  两进程共用同一 fail-closed 急停线，**红线：总占用不超单机预算**。
+- **事件 platform 盖章**：8 类 NDJSON 事件转发到渲染层时统一注入 `platform`
+  （协议本身不变）；`job:resolve-ticket` 载荷新增可选 `jobId` 做进程路由（不透传 Python）。
+- **互斥语义分层**：`jobState.isJobActive(platform?)` 派生自槽位表——账号增删改按
+  **平台**锁（超星任务运行时仍可维护智慧树账号文件）；设置/AI 配置等共享配置在
+  **任意平台**任务运行时锁定。
+
+### Python 平台层（core/orchestrator 不动）
+
+- `platforms/zhihuishu/api.py` 补齐 4 个内存 argparse 参数并挂 `core.memory` 的
+  `MemoryMonitor`/`gate_open`/`measure_project_chrome_gb` 模块钩子
+  （`core.orchestrator.ModuleRunner` 惰性读取）——修复此前「UI 启动智慧树任务因
+  未识别参数直接退出」的存量 bug，并使智慧树获得与超星同构的预算闸门/监视器。
+
+### 渲染层
+
+- `execution.store` 槽位化：`Record<Platform, Slot>` 各持 jobId/status/lanes/phases/
+  计时（lane 计时分槽持有，跨平台同号账号天然不撞）；事件监听一次注册、按
+  `event.jobId` 路由到槽；任务完成后的课程回读显式带任务自己的平台（修课程桶错读）。
+- 执行页按平台分组双 banner（各自 暂停/继续/停止/关闭 与统计）；侧栏平台切换在
+  任务运行中**允许**（切换只是 UI 上下文，数据按平台分桶）；课程总览启动按钮按
+  「同平台运行中」禁用；`memory.store` 事件/计划按平台分桶。
+- mock 层 `simulations Map`：同平台再启动=替换旧仿真（模拟互斥），跨平台并存，
+  事件带 `jobId`/`platform`——dev mock 模式可完整演示双平台并行。
+
+## 运行时内存监督与执行页预算仪表（2026-09-13）
+
+### 内存监督（策略 C，Electron 主进程）
+
+- **决策纯函数** `electron/memory/supervision.ts`（不 import electron，vitest 直测）：
+  `decidePauseAction(sample, slots, now, lastEngageAt, cooldownMs)` ——
+  `systemUsedGB ≥ systemLimitGB − 1GB`（预警线）时，对「运行中且未被监督暂停」的
+  槽位里 `projectChromeGB`（最新 MEMORY 事件喂入）最大者发暂停指令；60s 冷却防
+  暂停风暴；无可暂停对象不动作（红线兜底仍是后端 MemoryMonitor fail-closed 急停）。
+- **服务** `electron/memory/supervisor.ts`（IO 编排，可 import electron）：
+  10s 定时器 `planner.measureSystemUsedGB` 自测 + `jobSlots.activeSlots()` 观测 →
+  纯函数决策 → 介入时经 job.handler 回调执行整任务暂停（与手动暂停同路径，含
+  JobStatus 同步）+ 系统 Notification（`settings.notifications` 门控）+
+  `on-memory-supervision` 推送。**只暂停不自动恢复**（防抖动）；用户手动「继续」
+  时 `markResumed` 清除介入标记；测量失败跳过本轮；无活跃槽位自动停表。
+- **接线**（`job.handler.ts`）：`job:start` acquire 后 `start(plan.systemLimitGB)`；
+  MEMORY 转发处 `noteUsage(platform, projectChromeGB)`；`resumeWholeJob` 清标记；
+  `stopAllJobs` 停表。
+
+### 执行页分平台预算仪表
+
+- `ExecutionStudioView` 每个平台分组（运行/暂停态）在 Runtime Banner 下渲染
+  `BudgetGauge` compact 横条（新增 `compact` 变体），消费 `memory.store` 的
+  `planFor(platform)` / `latestFor(platform)`（projectChromeGB / remainingCount）；
+  顶部监督提示条仅在 `supervision.state === 'engaged'` 时显示（armed 不打扰）。
+- `memory.store` 增 `supervision` ref（订阅 `onMemorySupervision`）与 `reset()`
+  （全空闲清状态，取代原 `setPlan(null)` 调用点）。
+
+### mock 合成 MEMORY（dev 演示补全）
+
+- `MockApiClient.onMemory` 从 noop 改真实监听；`simulateJob` 每 tick 发合成
+  MEMORY 快照（占用 ≈ 0.45×活跃 lane + 漂移，字段口径对齐后端）。
+- mock `startJob` 为 JobHandle 附 `memoryPlan`：单平台满额（32/14/13.5 全局口径），
+  双平台并行按剩余分账语义合成（内联迷你 `allocateBudget`——渲染层不可 import
+  electron/，后来者 clamp 到 0.7GB 单账号下限、systemLimitGB 保持全机值）；
+  `execution.store.startJob` 即写 `setPlan`，仪表启动即可见。
+
+## 智慧树 M4 答题求解（2026-09-13）
+
+- **solver** `platforms/zhihuishu/solvers/quiz.py`（架构对齐超星 quiz solver，
+  2026-09-13 真机 11 轮迭代定型）：清「课程提醒」弹窗 → 真实点击章测入口内层
+  `.name`（点 li 本体不触发）→ 试卷在**新标签页** stuExamWeb 打开（`#/webExamList/
+  dohomework/...`），全部试卷操作经 JS runner 在 exam page 对象上执行（bringToFront
+  定位最新一页）→ **单题展示逐题走**：DOM 读题型/选项（`.examPaper_subject`/
+  `.subject_type_describe`/`.nodeLab` 字母 span+隐藏 radio，文本明文）→ **题干为
+  加密渲染**（`.subject_describe` DOM 空文本、屏幕可见）→ 每题截图走
+  `core.ai.router#ai_solve_quiz_image` 视觉作答 → `map_answer_to_letters` 按选项
+  内容映射（判断题「对/错」文本匹配，选项顺序每卷随机）→ `.mr10` 字母 span 精确
+  过滤点所在 `.label`（真实事件）→ getByRole('button') 点「下一题」逐题存草稿；
+  **末题防循环守卫**（按钮禁用时 text= 会命中提示文案——屏幕题号不前进即收卷）。
+  提交走「提交作业」+确认；安全档位对齐超星：`dry_run` 纯跳过、`grade_only`
+  填答不提交、真实提交间 60–120s 随机节奏、每节 `check_signals()` 让位、
+  单节异常隔离、finally 统一关试卷页防陈旧标签。真机验证：绪论单元测试
+  草稿 10/10、完成率 100%、未提交（见验证清单 P1-6/P1-6a/P1-6b）。
+
+  用户复核收口三修复（2026-09-13 深夜，DOM+vision 交叉定位）：
+  - **多选「确定」钮**：checkbox 选项点击后必须点题块内「确定」，否则翻页
+    即弃（`_fill_current` 多选分支）；
+  - **选中态双信号**：站点的选中是 Vue 组件态（换 img 图标），原生
+    `input.checked` 只在草稿恢复态可靠、新点击不同步——`read_selections`
+    读 `checked OR 图标少数派`（题内与众数 src 不同的即选中）；读失败返回
+    None 与空表区分（防守护进程抖动假阴性误补点反选）；
+  - **末题暂存**：站点保存机制是「点选项后点下一题」，末题没有下一题——
+    grade-only 收尾点「暂存作业」（.btn 族定位回退 + 重试；只存草稿不交卷）。
+  登录侧配套：扫码成功跳转后**立即导出 storageState**（校验失败不浪费扫码）
+    + 课程列表校验失败重试一次（Cookie 跨子域传播竞态）。
+- **弹题三层链路**（`video.py`）：试选揭示法（406653 技巧，确定性，第一优先）→
+  揭示失败走 AI 路由（判断型映射 A/B）→ 再失败关闭弹题发 hint 工单，不卡视频流。
+- **接线**（`api.py`）：`VALID_PHASES` 补 `solve_quiz`；`solve_only` 语义修正为仅
+  答题跳过视频（原为 full 别名的遗留缺陷，`quiz_only` 双构造路径自洽推导）；
+  `--grade-only` / `--dry-run` 旗标贯通 `RunConfig`。
+- **能力矩阵翻转**：`platforms.ts` zhihuishu `solveOnly: true`（去「M4 开发中」
+  置灰），「仅刷题」按钮开放：batch-exec → solve_only → M4 solver。

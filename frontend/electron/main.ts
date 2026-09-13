@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { execFile } from 'child_process'
-import { registerJobHandlers, stopActiveJob } from './ipc/job.handler'
+import { registerJobHandlers, stopAllJobs } from './ipc/job.handler'
 import { registerStatusHandlers } from './ipc/status.handler'
 import { registerCourseHandlers } from './ipc/course.handler'
 import { registerBalanceHandlers } from './ipc/balance.handler'
@@ -34,7 +34,8 @@ app.commandLine.appendSwitch('disable-gpu-compositing')
 // Constants
 // ----------------------------------------------------------------
 
-const APP_NAME = 'chaoxing-assistant'
+const APP_NAME = 'jlu-study-assistant'
+const LEGACY_APP_NAME = 'chaoxing-assistant'
 
 const WINDOW_DEFAULTS = {
   width: 1540,
@@ -42,7 +43,7 @@ const WINDOW_DEFAULTS = {
   minWidth: 1024,
   minHeight: 680,
   show: false, // show after ready-to-show to avoid white flash
-  title: '超星助手 - Chaoxing Assistant',
+  title: 'JLU 学习助手',
   icon: path.join(__dirname, '../build/icon.ico'),
   webPreferences: {
     preload: path.join(__dirname, 'preload.js'),
@@ -86,7 +87,7 @@ function pruneOldLogs(days: number): void {
  * Best-effort cleanup of orphaned Chromium processes that belong to this app.
  * Only targets chrome.exe/chromium.exe whose command line contains the app's
  * data root (the persistent profile path), so unrelated browsers are never
- * force-killed. The playwright-cli session close in stopActiveJob() is the
+ * force-killed. The playwright-cli session close in stopAllJobs() is the
  * primary cleanup; this is a safety net for crashed sessions.
  */
 function cleanupOrphanedChromium(): void {
@@ -157,7 +158,30 @@ function registerAllHandlers(): void {
 // App lifecycle
 // ----------------------------------------------------------------
 
+/**
+ * One-time userData migration from the legacy brand (chaoxing-assistant) to
+ * the multi-platform app name. Only relevant for PACKAGED builds — in dev the
+ * writable data lives in the repo's data/ tree via CHAOXING_DATA_DIR, not
+ * userData. Must run before anything reads app.getPath('userData').
+ * Best-effort: on failure (locked files, partial rename) we keep going with a
+ * fresh directory rather than blocking startup.
+ */
+function migrateLegacyUserData(): void {
+  try {
+    const newPath = app.getPath('userData')
+    if (path.basename(newPath) !== APP_NAME) return
+    const parent = path.dirname(newPath)
+    const legacyPath = path.join(parent, LEGACY_APP_NAME)
+    if (!fs.existsSync(legacyPath) || fs.existsSync(newPath)) return
+    fs.renameSync(legacyPath, newPath)
+    console.log(`[main] Migrated userData: ${legacyPath} -> ${newPath}`)
+  } catch (err) {
+    console.warn('[main] Legacy userData migration failed (continuing):', err)
+  }
+}
+
 app.setName(APP_NAME)
+migrateLegacyUserData()
 
 app.whenReady().then(() => {
   // Seed the writable workspace before any handler can spawn the backend
@@ -194,13 +218,14 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
-  stopActiveJob()
+  // 双平台并行：逐一停止所有平台的活跃任务。
+  stopAllJobs()
   // Clean up orphaned Playwright Chromium processes scoped to this app's data
-  // root (stopActiveJob already closes the sessions gracefully).
+  // root (stopAllJobs already closes the sessions gracefully).
   cleanupOrphanedChromium()
 })
 
 app.on('quit', () => {
   // Final cleanup if any remaining processes
-  stopActiveJob()
+  stopAllJobs()
 })

@@ -38,6 +38,35 @@ export function computeMemoryPlan(
   }
 }
 
+/**
+ * 双平台并行时的动态剩余分账：新任务预算份额 =
+ *   clamp(全局预算 − 其他活跃任务已授予之和, 最低保障 1 账号, 全局预算)。
+ *
+ * 「授予额」允许受控超卖——对方实际占用低于其份额时，本任务仍可启动；两平台
+ * Python 进程的内存闸门（gate_open）实测的都是全局 Chrome 占用（profile 同根
+ * 目录），实际内存天然收敛不超单机预算。systemLimitGB 恒保持全机值：两进程
+ * 共用同一 fail-closed 急停线，任何一方触线都会硬停，红线不破。
+ *
+ * 前置条件：plan 本身已通过「预算 ≥ 单实例估计」检查（见 job.handler job:start），
+ * 因此 clamp 后份额恒 ≥ 1 账号；maxConcurrent 按份额以 computeMemoryPlan 同
+ * 一公式重算。
+ */
+export function allocateBudget(
+  plan: MemoryPlan,
+  grantedToOthers: number[],
+): MemoryPlan {
+  const granted = grantedToOthers.reduce((sum, g) => sum + Math.max(0, g), 0)
+  const est = Math.max(plan.perAccountEstimateGB, 0.1)
+  const shareGB = Math.min(Math.max(plan.budgetGB - granted, est), plan.budgetGB)
+  const memMax = Math.max(1, Math.floor(shareGB / est))
+  return {
+    ...plan,
+    budgetGB: shareGB,
+    memMax,
+    maxConcurrent: Math.max(1, Math.min(memMax, plan.cpuCap)),
+  }
+}
+
 function runPs(script: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
@@ -64,9 +93,18 @@ export async function measureSystemUsedGB(): Promise<number> {
 export async function measureProjectChromeGB(profileRoot: string): Promise<number> {
   const esc = profileRoot.replace(/'/g, "''")
   const out = await runPs(
-    `$p=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'";` +
+    // 粗筛快路径：Get-Process（毫秒级）确认 chrome 存在，不存在则跳过 CIM
+    // （与后端 core/memory.py 同款优化——多 Chrome 进程时全量 CIM 查询可超 20s）。
+    `if(-not(Get-Process -Name chrome -ErrorAction SilentlyContinue))` +
+      `{[Console]::Out.Write('0');return};` +
+      `$p=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" ` +
+      `-Property WorkingSetSize,CommandLine;` +
       `$m=$p|Where-Object{$_.CommandLine -like '*${esc}*'};` +
       `$s=($m|Measure-Object -Property WorkingSetSize -Sum).Sum;` +
+      // 没有项目 Chrome 进程时 Sum 为 $null → PowerShell 输出空串，会被
+      // runPs 当作探针失败、连带系统测量一起回退到 os 估计。显式归零
+      // （与后端 core/memory.py 的同款脚本守卫一致）。
+      `if($null -eq $s){$s=0};` +
       `[Console]::Out.Write([string]$s)`,
   )
   return Number(out) / 1024 ** 3

@@ -1,13 +1,16 @@
 import type {
   Account,
   AccountLane,
+  AppApi,
   Balance,
-  ChaoxingApi,
   CompletionEvent,
   Course,
   ErrorEvent,
   JobHandle,
+  MemoryEvent,
+  MemoryPlan,
   PhaseChangeEvent,
+  Platform,
   ProgressEvent,
   RuntimePhase,
   Settings,
@@ -38,9 +41,30 @@ const MOCK_CAPTCHA_IMAGE =
     '</svg>',
   )
 
+// Placeholder QR-looking block (inline SVG) for the zhihuishu QR-login demo
+// ticket in mock/browser mode.
+const MOCK_QR_IMAGE = (() => {
+  let cells = ''
+  for (let y = 0; y < 12; y++) {
+    for (let x = 0; x < 12; x++) {
+      if ((x * 7 + y * 13 + ((x * y) % 5)) % 3 === 0) {
+        cells += `<rect x="${x * 20 + 4}" y="${y * 20 + 4}" width="14" height="14" fill="#111"/>`
+      }
+    }
+  }
+  return (
+    'data:image/svg+xml;utf8,' +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240">` +
+        `<rect width="240" height="240" fill="#fff"/>${cells}</svg>`,
+    )
+  )
+})()
+
 
 interface JobSimulation {
   jobId: string
+  platform: Platform
   payload: StartJobPayload
   handle: JobHandle
   timers: ReturnType<typeof setTimeout>[]
@@ -49,18 +73,30 @@ interface JobSimulation {
 
 const MAX_TICKETS = 200
 
-export class MockApiClient implements ChaoxingApi {
-  private accounts: Account[] = []
+const PLATFORMS: Platform[] = ['chaoxing', 'zhihuishu']
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+export class MockApiClient implements AppApi {
+  /** 按平台分桶的 mock 状态（与真实 store 的分桶模型一致）。 */
+  private accountsByPlatform: Record<Platform, Account[]> = { chaoxing: [], zhihuishu: [] }
   private coursesByAccount: Record<string, Course[]> = {}
   private tickets: Ticket[] = []
-  private currentSimulation: JobSimulation | null = null
+  /** 按 jobId 键控的并行仿真：同平台互斥（再启动即替换），跨平台并存。 */
+  private simulations = new Map<string, JobSimulation>()
   private listeners = new Map<string, Set<EventCallback>>()
 
   constructor() {
-    this.accounts = generateMockAccounts()
-    this.tickets = generateMockTickets()
-    for (const account of this.accounts.slice(0, 5)) {
-      this.coursesByAccount[account.id] = generateMockCoursesForAccount(account.id)
+    for (const platform of PLATFORMS) {
+      // zhihuishu gets fewer seeded accounts — mirrors a mid-migration setup.
+      const count = platform === 'chaoxing' ? 8 : 3
+      this.accountsByPlatform[platform] = generateMockAccounts(count, platform)
+      for (const account of this.accountsByPlatform[platform].slice(0, platform === 'chaoxing' ? 5 : 3)) {
+        this.coursesByAccount[`${platform}:${account.id}`] = generateMockCoursesForAccount(account.id, undefined, platform)
+      }
+      this.tickets.push(...generateMockTickets(undefined, platform))
     }
   }
 
@@ -79,8 +115,8 @@ export class MockApiClient implements ChaoxingApi {
     }
   }
 
-  private addLog(level: string, message: string): void {
-    this.emit('log', { level, message, timestamp: Date.now() })
+  private addLog(level: string, message: string, jobId?: string, platform?: Platform): void {
+    this.emit('log', { jobId: jobId ?? '', platform, level, message, timestamp: Date.now() })
   }
 
   private clearTimers(simulation: JobSimulation): void {
@@ -90,10 +126,21 @@ export class MockApiClient implements ChaoxingApi {
     simulation.timers = []
   }
 
-  private stopSimulation(): void {
-    if (!this.currentSimulation) return
-    this.currentSimulation.running = false
-    this.clearTimers(this.currentSimulation)
+  private stopSimulation(simulation: JobSimulation): void {
+    simulation.running = false
+    this.clearTimers(simulation)
+    this.simulations.delete(simulation.jobId)
+  }
+
+  /** 同平台互斥：停掉该平台既有仿真（模拟后端 per-platform 槽位语义）。 */
+  private stopSimulationForPlatform(platform: Platform): void {
+    for (const simulation of this.simulations.values()) {
+      if (simulation.platform === platform) {
+        simulation.running = false
+        this.clearTimers(simulation)
+        this.simulations.delete(simulation.jobId)
+      }
+    }
   }
 
   private cloneHandle(handle: JobHandle): JobHandle {
@@ -105,14 +152,54 @@ export class MockApiClient implements ChaoxingApi {
   }
 
   private getSimulation(jobId: string): JobSimulation {
-    if (!this.currentSimulation || this.currentSimulation.jobId !== jobId) {
+    const simulation = this.simulations.get(jobId)
+    if (!simulation) {
       throw new Error(`Job ${jobId} not found`)
     }
-    return this.currentSimulation
+    return simulation
   }
 
   private getMaxConcurrency(payload: StartJobPayload): number {
     return Math.max(1, Number(payload.options?.maxConcurrency ?? 2))
+  }
+
+  /** 仿真口径的全局内存计划（与 mock getMemoryPlan 同一数值）。 */
+  private static MOCK_BASE_PLAN: MemoryPlan = {
+    totalGB: 32, baselineGB: 14, budgetGB: 13.5, cpuCap: 8,
+    memMax: 19, maxConcurrent: 8, systemLimitGB: 28.5, perAccountEstimateGB: 0.7,
+  }
+
+  /** 剩余分账（迷你 allocateBudget）：份额 = clamp(全局预算 − 其他平台已授予, 1 账号, 全局预算)。 */
+  private synthesizeMemoryPlan(platform: Platform): MemoryPlan {
+    const base = MockApiClient.MOCK_BASE_PLAN
+    const granted = [...this.simulations.values()]
+      .filter((s) => s.platform !== platform && s.running)
+      .reduce((sum, s) => sum + (s.handle.memoryPlan?.budgetGB ?? 0), 0)
+    if (granted <= 0) return { ...base }
+    const est = base.perAccountEstimateGB
+    const shareGB = Math.min(Math.max(base.budgetGB - granted, est), base.budgetGB)
+    const memMax = Math.max(1, Math.floor(shareGB / est))
+    return { ...base, budgetGB: shareGB, memMax, maxConcurrent: Math.max(1, Math.min(memMax, base.cpuCap)) }
+  }
+
+  /** 每个仿真 tick 发一条合成 MEMORY：占用随活跃 lane 数增长（封顶预算内），
+   *  字段口径与后端 core.memory.MemoryMonitor 的快照一致。 */
+  private emitMockMemory(simulation: JobSimulation, runningLanes: number): void {
+    const plan = simulation.handle.memoryPlan ?? MockApiClient.MOCK_BASE_PLAN
+    const usage = Math.min(plan.budgetGB * 0.95, 0.45 * runningLanes + Math.random() * 0.2)
+    const perAccountAvg = runningLanes > 0 ? usage / runningLanes : plan.perAccountEstimateGB
+    const remaining = Math.max(0, Math.floor((plan.budgetGB - usage) / plan.perAccountEstimateGB))
+    this.emit('memory', {
+      type: 'MEMORY',
+      jobId: simulation.handle.jobId,
+      platform: simulation.platform,
+      budgetGB: round2(plan.budgetGB),
+      projectChromeGB: round2(usage),
+      perAccountAvgGB: round2(perAccountAvg),
+      remainingCount: remaining,
+      level: 'info',
+      message: `mock: project=${usage.toFixed(2)}GB avg=${perAccountAvg.toFixed(2)}GB`,
+    } satisfies MemoryEvent)
   }
 
   private syncHandleStatus(simulation: JobSimulation): void {
@@ -153,9 +240,10 @@ export class MockApiClient implements ChaoxingApi {
     }
   }
 
-  private emitStoppedCompletion(jobId: string, startedAt: number): void {
+  private emitStoppedCompletion(simulation: JobSimulation): void {
     this.emit('completed', {
-      jobId,
+      jobId: simulation.handle.jobId,
+      platform: simulation.platform,
       success: false,
       results: {
         totalSections: 0,
@@ -164,7 +252,7 @@ export class MockApiClient implements ChaoxingApi {
         totalQuizzes: 0,
         solvedQuizzes: 0,
         failedQuizzes: 0,
-        durationMs: Date.now() - startedAt,
+        durationMs: Date.now() - simulation.handle.createdAt,
       },
       timestamp: Date.now(),
     } satisfies CompletionEvent)
@@ -172,39 +260,71 @@ export class MockApiClient implements ChaoxingApi {
 
   async startJob(payload: StartJobPayload): Promise<JobHandle> {
     await sleep(300)
-    this.stopSimulation()
+    const jobPlatform: Platform = payload.platform ?? 'chaoxing'
+    // 同平台互斥：替换该平台的旧仿真；另一平台的仿真不受影响（双平台并行）。
+    this.stopSimulationForPlatform(jobPlatform)
 
     const handle = generateMockJobHandle(payload)
-    this.currentSimulation = {
+    // 分账计划（仿真口径）：单平台满额；另一平台并行时按「全局预算 − 对方
+    // 已授予份额、下限 1 账号」的剩余分账语义合成——与主进程
+    // electron/memory/planner#allocateBudget 同一公式（渲染层不可 import
+    // electron/，故内联迷你版），供执行页分平台预算仪表演示。
+    handle.memoryPlan = this.synthesizeMemoryPlan(jobPlatform)
+    const simulation: JobSimulation = {
       jobId: handle.jobId,
+      platform: jobPlatform,
       payload,
       handle,
       timers: [],
       running: true,
     }
+    this.simulations.set(handle.jobId, simulation)
 
-    this.simulateJob(this.currentSimulation)
+    this.simulateJob(simulation)
 
-    // Demo: surface a captcha ticket a few seconds in so the CaptchaModal can
-    // be exercised in browser/mock mode without a real backend.
+    // Demo: surface a platform-appropriate interactive ticket a few seconds in
+    // so the CaptchaModal can be exercised in browser/mock mode without a real
+    // backend — chaoxing shows the captcha-input form, zhihuishu the QR-scan
+    // form (with its own countdown).
     const captchaTimer = setTimeout(() => {
-      if (!this.currentSimulation?.running) return
+      if (!simulation.running) return
       const accountId = payload.accounts?.[0] ?? '0'
-      const captcha: Ticket = {
-        id: `captcha_${accountId}_${Math.floor(Date.now() / 1000)}`,
-        title: '需要人工输入验证码',
-        message: `账号 ${accountId} 在反爬验证码处受阻，AI 识别失败，请人工输入`,
-        severity: 'critical',
-        accountId: String(accountId),
-        kind: 'captcha',
-        imageBase64: MOCK_CAPTCHA_IMAGE,
-        options: ['输入验证码', '跳过此课程'],
-        resolved: false,
-        createdAt: Date.now(),
-      }
-      this.addTicket(captcha)
+      // 演示工单的 accountId 必须可被 captchaStore.parseAccountId 解析为整数
+      // （mock 账号 id 是 acct_* 字符串，直接透传会令提交/跳过报错）。
+      const numericAccountId = String(Number.parseInt(String(accountId), 10) || 0)
+      const stamp = Math.floor(Date.now() / 1000)
+      const demo: Ticket = jobPlatform === 'zhihuishu'
+        ? {
+            id: `zhihuishu-qr-login-${accountId}-${stamp}`,
+            jobId: handle.jobId,
+            title: '智慧树扫码登录',
+            message: `账号 ${accountId}：请使用智慧树 App 扫描二维码登录（storageState 未命中）`,
+            severity: 'critical',
+            accountId: numericAccountId,
+            platform: jobPlatform,
+            kind: 'qrcode',
+            imageBase64: MOCK_QR_IMAGE,
+            timeoutSeconds: 180,
+            resolved: false,
+            createdAt: Date.now(),
+          }
+        : {
+            id: `captcha_${accountId}_${stamp}`,
+            jobId: handle.jobId,
+            title: '需要人工输入验证码',
+            message: `账号 ${accountId} 在反爬验证码处受阻，AI 识别失败，请人工输入`,
+            severity: 'critical',
+            accountId: numericAccountId,
+            platform: jobPlatform,
+            kind: 'captcha',
+            imageBase64: MOCK_CAPTCHA_IMAGE,
+            options: ['输入验证码', '跳过此课程'],
+            resolved: false,
+            createdAt: Date.now(),
+          }
+      this.addTicket(demo)
     }, 4000)
-    this.currentSimulation.timers.push(captchaTimer)
+    simulation.timers.push(captchaTimer)
 
     return this.cloneHandle(handle)
   }
@@ -274,9 +394,10 @@ export class MockApiClient implements ChaoxingApi {
 
     this.syncHandleStatus(simulation)
     if (simulation.handle.status === 'stopped') {
-      this.emitStoppedCompletion(jobId, simulation.handle.createdAt)
+      this.emitStoppedCompletion(simulation)
     }
-    this.addLog('warn', accountIds?.length ? 'Stopped selected accounts.' : 'Stopped job.')
+    this.addLog('warn', accountIds?.length ? 'Stopped selected accounts.' : 'Stopped job.',
+      jobId, simulation.platform)
   }
 
   async pauseSelected(jobId: string, accountIds: string[]): Promise<void> {
@@ -309,36 +430,45 @@ export class MockApiClient implements ChaoxingApi {
     return this.cloneHandle(this.getSimulation(jobId).handle)
   }
 
-  async scanCourses(accountIds?: string[]): Promise<Course[]> {
+  async scanCourses(accountIds?: string[], platform?: Platform): Promise<Course[]> {
     await sleep(500)
-    const targetIds = accountIds?.length ? accountIds : this.accounts.slice(0, 5).map((account) => account.id)
+    const scoped: Platform = platform ?? 'chaoxing'
+    const accounts = this.accountsByPlatform[scoped]
+    const targetIds = accountIds?.length
+      ? accountIds
+      : accounts.slice(0, 5).map((account) => account.id)
     const results: Course[] = []
 
     for (const accountId of targetIds) {
-      const courses = generateMockCoursesForAccount(accountId)
-      this.coursesByAccount[accountId] = courses
+      const courses = generateMockCoursesForAccount(accountId, undefined, scoped)
+      this.coursesByAccount[`${scoped}:${accountId}`] = courses
       results.push(...courses)
     }
 
-    this.addLog('info', `Scanned ${results.length} courses.`)
+    this.addLog('info', `Scanned ${results.length} courses (${scoped}).`)
     return results
   }
 
-  async getCourses(accountId?: string): Promise<Course[]> {
+  async getCourses(accountId?: string, platform?: Platform): Promise<Course[]> {
     await sleep(150)
+    const scoped: Platform = platform ?? 'chaoxing'
     if (accountId) {
-      if (!this.coursesByAccount[accountId]) {
-        this.coursesByAccount[accountId] = generateMockCoursesForAccount(accountId)
+      const key = `${scoped}:${accountId}`
+      if (!this.coursesByAccount[key]) {
+        this.coursesByAccount[key] = generateMockCoursesForAccount(accountId, undefined, scoped)
       }
-      return [...this.coursesByAccount[accountId]]
+      return [...this.coursesByAccount[key]]
     }
 
-    return Object.values(this.coursesByAccount).flatMap((courses) => courses)
+    return Object.entries(this.coursesByAccount)
+      .filter(([key]) => key.startsWith(`${scoped}:`))
+      .flatMap(([, courses]) => courses)
   }
 
-  async getAccounts(): Promise<Account[]> {
+  async getAccounts(platform?: Platform): Promise<Account[]> {
     await sleep(150)
-    return this.accounts.map((account) => ({
+    const scoped: Platform = platform ?? 'chaoxing'
+    return this.accountsByPlatform[scoped].map((account) => ({
       ...account,
       lastChecked: Date.now(),
       status: account.status === 'checking' ? 'online' : account.status,
@@ -347,7 +477,8 @@ export class MockApiClient implements ChaoxingApi {
 
   async getAccountStatus(accountId: string): Promise<Account> {
     await sleep(100)
-    const account = this.accounts.find((item) => item.id === accountId)
+    const account = [...this.accountsByPlatform.chaoxing, ...this.accountsByPlatform.zhihuishu]
+      .find((item) => item.id === accountId)
     if (!account) {
       throw new Error(`Account ${accountId} not found`)
     }
@@ -356,12 +487,12 @@ export class MockApiClient implements ChaoxingApi {
 
   async getSettings(): Promise<Settings> {
     await sleep(100)
-    const stored = localStorage.getItem('chaoxing-assistant-settings')
+    const stored = localStorage.getItem('jlu-study-assistant-settings')
     if (stored) {
       try {
         return JSON.parse(stored)
       } catch {
-        localStorage.removeItem('chaoxing-assistant-settings')
+        localStorage.removeItem('jlu-study-assistant-settings')
       }
     }
 
@@ -376,7 +507,7 @@ export class MockApiClient implements ChaoxingApi {
       debugMode: false,
       headless: true,
       targetAccuracy: 100,
-      accountsFilePath: '',
+      accountsFilePaths: { chaoxing: '', zhihuishu: '' },
       concurrencyTarget: null,
       perAccountEstimateGB: 0.7,
       pythonPath: '',
@@ -392,7 +523,7 @@ export class MockApiClient implements ChaoxingApi {
 
   async setSettings(settings: Settings): Promise<void> {
     await sleep(100)
-    localStorage.setItem('chaoxing-assistant-settings', JSON.stringify(settings))
+    localStorage.setItem('jlu-study-assistant-settings', JSON.stringify(settings))
   }
 
   async getAiStatus(): Promise<{ provider: string; label: string; configured: boolean; model: string; keyTail: string }> {
@@ -409,16 +540,28 @@ export class MockApiClient implements ChaoxingApi {
     return { ok: true, models: 3 }
   }
 
-  async addAccount(_payload: { account: string; password: string; website?: string }): Promise<void> {
+  async addAccount(payload: { account: string; password: string; website?: string; platform?: Platform }): Promise<void> {
+    await sleep(150)
+    // Mock mutation so the settings view reflects add/edit/remove instantly.
+    const platform: Platform = payload.platform ?? 'chaoxing'
+    this.accountsByPlatform[platform].push({
+      id: `acct_${Date.now()}_${this.accountsByPlatform[platform].length}`,
+      username: payload.account,
+      displayName: payload.account,
+      website: payload.website,
+      platform,
+      status: 'online',
+    })
+  }
+
+  async editAccount(_payload: { index: number; password?: string; website?: string; platform?: Platform }): Promise<void> {
     await sleep(150)
   }
 
-  async editAccount(_payload: { index: number; password?: string; website?: string }): Promise<void> {
+  async removeAccount(index: number, platform?: Platform): Promise<void> {
     await sleep(150)
-  }
-
-  async removeAccount(_index: number): Promise<void> {
-    await sleep(150)
+    const scoped: Platform = platform ?? 'chaoxing'
+    this.accountsByPlatform[scoped].splice(index, 1)
   }
 
   async openFilePicker(): Promise<string | null> {
@@ -426,9 +569,9 @@ export class MockApiClient implements ChaoxingApi {
     return null
   }
 
-  async getAccountsDefaultPath(): Promise<string> {
+  async getAccountsDefaultPath(platform?: Platform): Promise<string> {
     await sleep(20)
-    return 'data/passwords/chaoxing.txt'
+    return `data/passwords/${platform ?? 'chaoxing'}.txt`
   }
 
   async getMemoryPlan(): Promise<import('./types').MemoryPlan> {
@@ -442,7 +585,8 @@ export class MockApiClient implements ChaoxingApi {
   async getTickets(): Promise<Ticket[]> {
     await sleep(150)
     if (Math.random() > 0.7) {
-      this.addTicket(generateMockTickets(1)[0])
+      const platform = PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)]
+      this.addTicket(generateMockTickets(1, platform)[0])
     }
     return [...this.tickets]
   }
@@ -461,6 +605,7 @@ export class MockApiClient implements ChaoxingApi {
   }
 
   async resolveCaptcha(payload: {
+    jobId?: string
     ticketId: string
     accountId: number
     answer?: string
@@ -468,7 +613,8 @@ export class MockApiClient implements ChaoxingApi {
   }): Promise<void> {
     await sleep(150)
     const verb = payload.action === 'skip' ? 'skipped' : `answered "${payload.answer}"`
-    this.addLog('info', `Captcha ${payload.ticketId} ${verb} (account ${payload.accountId}).`)
+    this.addLog('info', `Captcha ${payload.ticketId} ${verb} (account ${payload.accountId}).`,
+      payload.jobId)
   }
 
   async getBalance(_provider?: 'doubao' | 'deepseek'): Promise<Balance> {
@@ -513,7 +659,7 @@ export class MockApiClient implements ChaoxingApi {
     return this.onWithCleanup('phaseChange', callback)
   }
 
-  onLog(callback: (line: { level: string; message: string; timestamp: number }) => void): () => void {
+  onLog(callback: (line: { jobId: string; platform?: Platform; level: string; message: string; timestamp: number }) => void): () => void {
     return this.onWithCleanup('log', callback)
   }
 
@@ -533,8 +679,13 @@ export class MockApiClient implements ChaoxingApi {
     return this.onWithCleanup('result', callback)
   }
 
-  onMemory(_callback: (e: import('./types').MemoryEvent) => void): () => void {
-    // Mock mode never emits MEMORY events.
+  onMemory(callback: (e: import('./types').MemoryEvent) => void): () => void {
+    // Mock 仿真按平台发射合成 MEMORY 事件（见 simulateJob 的 tick）。
+    return this.onWithCleanup('memory', callback)
+  }
+
+  onMemorySupervision(_callback: (e: import('./types').MemorySupervisionEvent) => void): () => void {
+    // Mock 模式不模拟内存监督介入——监督是主进程对真实 Python 进程的行为。
     return () => {}
   }
 
@@ -544,7 +695,9 @@ export class MockApiClient implements ChaoxingApi {
 
   dispose(): void {
     this.listeners.clear()
-    this.stopSimulation()
+    for (const simulation of [...this.simulations.values()]) {
+      this.stopSimulation(simulation)
+    }
   }
 
   private onWithCleanup<T>(event: string, callback: (payload: T) => void): () => void {
@@ -582,6 +735,7 @@ export class MockApiClient implements ChaoxingApi {
 
     this.emit('completed', {
       jobId: simulation.handle.jobId,
+      platform: simulation.platform,
       success: true,
       results: {
         totalSections: simulation.handle.courseCount * 10,
@@ -595,7 +749,8 @@ export class MockApiClient implements ChaoxingApi {
       timestamp: Date.now(),
     } satisfies CompletionEvent)
 
-    this.addLog('info', 'Job completed.')
+    this.addLog('info', `Job completed (${simulation.platform}).`,
+      simulation.handle.jobId, simulation.platform)
     this.addTicket(generateMockTickets(1)[0])
   }
 
@@ -644,6 +799,7 @@ export class MockApiClient implements ChaoxingApi {
 
       this.emit('progress', {
         jobId: simulation.handle.jobId,
+        platform: simulation.platform,
         phase: phase.name,
         phaseIndex: simulation.handle.phaseIndex,
         percent: simulation.handle.progress,
@@ -651,7 +807,11 @@ export class MockApiClient implements ChaoxingApi {
         timestamp: Date.now(),
       } satisfies ProgressEvent)
 
-      this.addLog('info', `[${phase.name}] ${Math.round(phase.progress)}%`)
+      // 合成 MEMORY 快照（执行页分平台预算仪表的数据源）。
+      this.emitMockMemory(simulation, runningLanes.length)
+
+      this.addLog('info', `[${simulation.platform}] ${phase.name} ${Math.round(phase.progress)}%`,
+        simulation.handle.jobId, simulation.platform)
 
       if (phase.progress >= 100) {
         const previousPhase = phase.name
@@ -664,6 +824,7 @@ export class MockApiClient implements ChaoxingApi {
           nextPhase.status = 'running'
           this.emit('phaseChange', {
             jobId: simulation.handle.jobId,
+            platform: simulation.platform,
             fromPhase: previousPhase,
             toPhase: nextPhase.name,
             phaseIndex: simulation.handle.phaseIndex,
