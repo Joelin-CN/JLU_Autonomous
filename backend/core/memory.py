@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import threading
+import time
 from typing import Optional
 
 from .constants import CHROME_PROFILES_DIR, SHUTDOWN_FLAG
@@ -14,6 +15,19 @@ EMERGENCY_MARGIN_GB = 1.0
 SAMPLE_INTERVAL_S = 5
 EMERGENCY_CONSECUTIVE = 2
 PROJECT_CAUSE_RATIO = 0.95
+
+# Chrome 树采样 TTL 缓存：MemoryMonitor 线程（5s 周期）与 orchestrator 内存
+# 闸门（账号线程等待槽位时轮询）会并发查询同一 profile_root，短 TTL 去重
+# 可以避免同一秒内重复 spawn powershell。
+MEASURE_CACHE_TTL_S = 2.0
+_measure_cache: dict = {}
+_measure_cache_lock = threading.Lock()
+
+
+def _clear_measure_cache() -> None:
+    """测试钩子：清空 Chrome 树采样缓存。"""
+    with _measure_cache_lock:
+        _measure_cache.clear()
 
 
 class MemorySamplerError(RuntimeError):
@@ -81,15 +95,31 @@ def measure_project_chrome_gb(profile_root: str = None) -> float:
     if sys.platform != "win32":
         raise MemorySamplerError("Chrome-tree sampling only implemented on Windows")
     root = profile_root or str(CHROME_PROFILES_DIR)
+    now = time.monotonic()
+    with _measure_cache_lock:
+        hit = _measure_cache.get(root)
+        if hit is not None and now - hit[1] < MEASURE_CACHE_TTL_S:
+            return hit[0]
     escaped = root.replace("'", "''")
+    # 性能（2026-09-13 专项）：多 Chrome 进程机器上 Get-CimInstance Win32_Process
+    # 全量查询可超 20s 触发 TimeoutExpired 降级。两级优化：
+    # 1) 粗筛快路径——Get-Process（.NET 内核 API，毫秒级）确认 chrome 存在，
+    #    不存在则完全跳过 CIM（空闲/浏览器未起时采样从 20s 级降到亚秒级）；
+    # 2) 属性投影——只取 WorkingSetSize/CommandLine，减少 WMI 编组开销。
     script = (
-        "$p = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\";"
+        "if (-not (Get-Process -Name chrome -ErrorAction SilentlyContinue)) "
+        "{ [Console]::Out.Write('0'); return };"
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" "
+        "-Property WorkingSetSize,CommandLine;"
         f"$m = $p | Where-Object {{ $_.CommandLine -like '*{escaped}*' }};"
         "$s = ($m | Measure-Object -Property WorkingSetSize -Sum).Sum;"
         "if ($null -eq $s) { $s = 0 };"
         "[Console]::Out.Write([string]($s))"
     )
-    return float(_run_ps(script)) / (1024 ** 3)
+    gb = float(_run_ps(script)) / (1024 ** 3)
+    with _measure_cache_lock:
+        _measure_cache[root] = (gb, time.monotonic())
+    return gb
 
 
 def measure_system_used_gb() -> float:

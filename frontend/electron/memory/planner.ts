@@ -93,7 +93,12 @@ export async function measureSystemUsedGB(): Promise<number> {
 export async function measureProjectChromeGB(profileRoot: string): Promise<number> {
   const esc = profileRoot.replace(/'/g, "''")
   const out = await runPs(
-    `$p=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'";` +
+    // 粗筛快路径：Get-Process（毫秒级）确认 chrome 存在，不存在则跳过 CIM
+    // （与后端 core/memory.py 同款优化——多 Chrome 进程时全量 CIM 查询可超 20s）。
+    `if(-not(Get-Process -Name chrome -ErrorAction SilentlyContinue))` +
+      `{[Console]::Out.Write('0');return};` +
+      `$p=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" ` +
+      `-Property WorkingSetSize,CommandLine;` +
       `$m=$p|Where-Object{$_.CommandLine -like '*${esc}*'};` +
       `$s=($m|Measure-Object -Property WorkingSetSize -Sum).Sum;` +
       // 没有项目 Chrome 进程时 Sum 为 $null → PowerShell 输出空串，会被
