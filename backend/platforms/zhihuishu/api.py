@@ -138,19 +138,27 @@ THREAD_PREFIX = "zhihuishu-account"
 
 
 class RunConfig:
-    """智慧树任务配置（与超星 RunConfig 同构的最小集）。"""
+    """智慧树任务配置（与超星 RunConfig 同构的最小集）。
+
+    双向自洽推导（真机实测教训：core.orchestrator 生产构造只传
+    scan_only/quiz_only 布尔、mode 落默认值；直接构造又只传 mode——
+    单边读取会误判，两边任传其一都推导齐全）。
+    """
 
     def __init__(self, *, course=None, dry_run=False, resume=False,
                  scan_only=False, quiz_only=False, content_only=False,
-                 grade_only=False, yes=True, mode="scan_only"):
+                 grade_only=False, yes=True, mode=None):
         self.course = course
         self.dry_run = dry_run
         self.resume = resume
-        self.scan_only = scan_only
-        self.quiz_only = quiz_only
         self.content_only = content_only
         self.grade_only = grade_only
         self.yes = yes
+        if mode is None:
+            mode = ("scan_only" if scan_only
+                    else "solve_only" if quiz_only else "full")
+        self.scan_only = scan_only or (mode == "scan_only")
+        self.quiz_only = quiz_only or (mode == "solve_only")
         self.mode = mode
 
 
@@ -191,10 +199,11 @@ def max_concurrent_cfg():
 
 
 def _run_account(account_index: int, creds: dict, config) -> bool:
-    mode = getattr(config, "mode", "scan_only")
-    # 生产路径由 core.orchestrator 构造 config（quiz_only=(mode=='solve_only')）；
-    # 直接调用（CLI/测试）时按模式自洽推导，两条路径语义一致。
-    quiz_only = bool(getattr(config, "quiz_only", False)) or mode == "solve_only"
+    # 生产路径由 core.orchestrator 构造 config 只传布尔；直接构造只传 mode——
+    # RunConfig 双向自洽推导后这里只需读 flags（真机实测曾因读 config.mode
+    # 默认值让生产路径永远进不了视频/答题分支）。
+    scan_only = bool(getattr(config, "scan_only", False))
+    quiz_only = bool(getattr(config, "quiz_only", False))
     dry_run = bool(getattr(config, "dry_run", False))
     grade_only = bool(getattr(config, "grade_only", False))
     session = f"{SESSION_PREFIX}-{account_index}"
@@ -235,7 +244,7 @@ def _run_account(account_index: int, creds: dict, config) -> bool:
              f"状态已存 {path.name}")
     _emit_progress(95, f"扫描完成：{len(courses)} 门课", account_index)
 
-    if mode != "scan_only":
+    if not scan_only:
         # M3：视频章节自动完成（D6 决策——仅 1.0 倍速真实播放，全程类人操作）
         # solve_only（仅刷题）跳过视频阶段，直接进入 M4 答题。
         if not quiz_only:

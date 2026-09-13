@@ -197,3 +197,22 @@ class TestApiPhasesAndDispatch:
         assert ok is True
         assert api_mod._calls["video"] == []
         assert api_mod._calls["quiz"] == []
+
+    def test_generic_runner_config_without_mode_attr(self, api_mod):
+        """生产路径回归：core.orchestrator 构造 config 只传布尔不传 mode——
+        真机实测曾因此永远进不了答题分支（读 config.mode 旧默认 scan_only）。
+        RunConfig 现双向自洽：只传布尔 → mode/flags 齐全。"""
+        cfg = api_mod.RunConfig(scan_only=False, quiz_only=True, grade_only=True)
+        assert cfg.mode == "solve_only" and cfg.quiz_only and not cfg.scan_only
+        ok = api_mod.run_account(0, {}, cfg)
+        assert ok is True
+        assert api_mod._calls["video"] == []
+        assert len(api_mod._calls["quiz"]) == 1
+        assert api_mod._calls["quiz"][0]["grade_only"] is True
+
+    def test_run_config_mode_only_derives_flags(self, api_mod):
+        """直接构造只传 mode → flags 反向推导齐全。"""
+        cfg = api_mod.RunConfig(mode="solve_only")
+        assert cfg.quiz_only and not cfg.scan_only
+        cfg2 = api_mod.RunConfig(mode="full")
+        assert not cfg2.quiz_only and not cfg2.scan_only
