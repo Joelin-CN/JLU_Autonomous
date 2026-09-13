@@ -1,20 +1,24 @@
 """智慧树章节测验/作业求解器（M4）——抽取 → AI 作答 → 填答 → 提交。
 
-架构对齐超星 ``platforms/chaoxing/solvers/quiz/``（抽取→AI→填答→提交），
-瘦身为单文件双策略（文本优先、截图兜底）；AI 路由复用 ``core.ai.router``
-（豆包/DeepSeek，配置同源 ``chaoxing_config.json``，零平台耦合）。
+架构对齐超星 ``platforms/chaoxing/solvers/quiz/``；AI 路由复用
+``core.ai.router``（配置同源 ``chaoxing_config.json``）。
 
-选择器词汇（M0 调研 + 2026-09-12 本地交叉验证，见
-``docs/reports/analysis/ZHIHUISHU_ANALYSIS_2026-09-12.md`` §4）：
-    - 章测入口：章节树 ``li.chapter-test``
-    - 作业/测验页（stuExamWeb 同构）：``.examPaper_subject`` 题块、
-      ``.subject_describe`` 题干、``.examquestions-answer .subject_node`` 选项
-    - 题型标记：``.title-tit`` / ``.subject_type``（【单选题】等）
+真机 DOM 事实（2026-09-13 探针实测，data/output/discovered_courses_* 与
+``docs/reports/analysis/ZHIHUISHU_ANALYSIS_2026-09-12.md`` §4 互补）：
+    - 点击章节树 ``li.chapter-test`` 在**新标签页**打开试卷
+      ``onlineexamh5new.zhihuishu.com/stuExamWeb.html#/webExamList/dohomework/...``；
+      学习页本身不加载任何题面。
+    - 试卷页**单题展示**：``.examPaper_subject`` 全量在 DOM，但仅当前题可见；
+      「下一题」翻页并保存答案。
+    - 题干异步/加密渲染：``.subject_describe`` 的 DOM 文本为空、屏幕上可见
+      （截图可读）→ 题干走**截图→AI 视觉**；选项文本在 DOM 明文
+      （``.nodeLab``：字母 span + 隐藏 radio + ``.examquestions-answer`` 文本）。
+    - 选项顺序随机排列（页面明示「以选项内容为准」）。
 
 反自动化红线（分析报告 Q5 / D6 同源纪律）：
-    - 只用真实点击（pw click，可信事件）；JS 仅只读取值
+    - 只用真实点击（locator click，可信事件）；JS 仅只读取值/截图
     - 真实提交之间 60–120s 随机节奏（dry_run / grade_only 跳过）
-    - grade_only（模拟运行）：完整导航→抽取→AI→填答，**绝不提交**
+    - grade_only（模拟运行）：完整导航→抽取→AI→填答，**绝不提交/暂存**
 
 安全档位（对齐超星语义）：
     - ``dry_run``：进入即返回，零导航零提交
@@ -28,9 +32,9 @@ import time
 
 from core.constants import TMP_DIR
 from core.logging_setup import log, ticket, check_signals
-from core.browser.engine import pw_snapshot, pw_click, pw_goto
+from core.browser.engine import pw_goto
 from core.browser.js_runner import _run_js_file, pw_extract_result
-from core.utils import find_ref_by_text, human_delay
+from core.utils import human_delay
 
 from platforms.zhihuishu.constants import build_study_url
 from platforms.zhihuishu.video import scroll_load_chapter_tree
@@ -48,9 +52,6 @@ _TYPE_MARKERS = [
     ("名词解释", "essay"),
     ("论述", "essay"),
 ]
-
-# 选项节点 CSS（抽取与点击共用同一条链，保证 nth 全局索引一致）
-_OPTION_CSS = ".examquestions-answer .subject_node"
 
 
 # ── 纯函数（单测直测，无浏览器）──────────────────────────────────────
@@ -84,14 +85,14 @@ def parse_answer_letters(answer) -> list:
     return list(dict.fromkeys(letters))
 
 
-def judge_answer_index(answer) -> int:
-    """判断题答案 → 选项序号：正确/对 → 0，错误/错 → 1；无法解析 → -1。"""
+def judge_answer_text(answer) -> str:
+    """判断题答案 → 选项文本匹配键：正确/对 → '对'，错误/错 → '错'；'' = 无法解析。"""
     text = str(answer if not isinstance(answer, list) else (answer[0] if answer else ""))
-    if re.search(r"正确|对$|√|true", text, re.IGNORECASE):
-        return 0
-    if re.search(r"错误|错$|×|false", text, re.IGNORECASE):
-        return 1
-    return -1
+    if re.search(r"正确|对|√|true", text, re.IGNORECASE):
+        return "对"
+    if re.search(r"错误|错|×|false", text, re.IGNORECASE):
+        return "错"
+    return ""
 
 
 def parse_score(text: str):
@@ -134,178 +135,198 @@ def parse_reveal_letters(raw: str) -> list:
     return [c for c in (m.group(1) if m else "") if "A" <= c <= "Z"]
 
 
-# ── 只读探测（JS 仅取值，不驱动）────────────────────────────────────
+def map_answer_to_letters(answer, qtype: str, option_letters: list,
+                          option_texts: list) -> list:
+    """把 AI 答案映射到当前题的选项字母（选项随机排列，以内容/可见字母为准）。
+
+    - single/multi：直接取答案字母，并与实际存在的字母求交
+    - judge：按「对/错」文本匹配选项内容再取其字母
+    """
+    if qtype == "judge":
+        key = judge_answer_text(answer)
+        if not key:
+            return []
+        for letter, text in zip(option_letters, option_texts):
+            if key in text or text in key:
+                return [letter]
+        return []
+    letters = [l for l in parse_answer_letters(answer) if l in option_letters]
+    return letters
+
+
+# ── 浏览器探针（JS 仅只读；点击一律 locator 真实事件）────────────────
 
 
 def _run_json(js: str, timeout: int = 20):
     raw = _run_js_file(js, timeout=timeout)
-    data = json.loads(pw_extract_result(raw) or raw)
-    if isinstance(data, str):
-        data = json.loads(data)
-    return data
-
-
-_EXTRACT_JS = """
-async (page) => {
-  const r = await page.evaluate(() => {
-    const subjects = [...document.querySelectorAll('.examPaper_subject')];
-    const items = subjects.map(s => {
-      const typeEl = s.querySelector('.subject_type, .title-tit');
-      const stem = (s.querySelector('.subject_describe') || s.querySelector('.subject_node p') || {}).innerText || '';
-      const options = [...s.querySelectorAll('%OPTION_CSS%')]
-        .map(o => (o.innerText || '').trim().slice(0, 80)).filter(Boolean);
-      return {typeText: ((typeEl || {}).innerText || '').trim(), stem: stem.trim(), options};
-    });
-    return JSON.stringify({items, url: location.href});
-  });
-  return r;
-}
-"""
-
-
-def extract_exam_questions() -> list:
-    """只读抽取测验页题块 [{typeText, stem, options}]（与 _OPTION_CSS 同链）。"""
-    js = _EXTRACT_JS.replace("%OPTION_CSS%", _OPTION_CSS)
     try:
-        data = _run_json(js, timeout=25)
-    except Exception as e:
-        log(f"测验题面抽取失败：{e}", "WARN")
-        return []
-    return data.get("items", [])
-
-
-def count_option_nodes() -> int:
-    """只读统计当前页选项节点总数（填答 nth 索引的对账口径）。"""
-    js = """
-async (page) => {
-  const r = await page.evaluate(() => {
-    return JSON.stringify({n: document.querySelectorAll('%CSS%').length});
-  });
-  return r;
-}
-""".replace("%CSS%", _OPTION_CSS)
-    try:
-        return int(_run_json(js, timeout=15).get("n", 0))
+        data = json.loads(pw_extract_result(raw) or raw)
+        if isinstance(data, str):
+            data = json.loads(data)
+        return data
     except Exception:
-        return 0
+        # CLI 会把 Playwright 错误（如 locator 超时）原样输出为非 JSON 文本——
+        # 带出真实原因，别让「Expecting value: char 0」掩盖 locator 超时
+        lines = (raw or "").strip().splitlines()
+        excerpt = lines[-1][:200] if lines else "<empty>"
+        raise RuntimeError(f"exam op 非法输出: {excerpt}")
 
 
-def _fullpage_screenshot(path: str) -> bool:
-    """整页截图（截图兜底策略的数据源；JS 仅截图不改状态）。"""
-    js = """
-async (page) => {
-  await page.screenshot({path: '%PATH%', fullPage: true});
-  return JSON.stringify({ok: true});
-}
-""".replace("%PATH%", path.replace("\\", "/").replace("'", "\\'"))
-    try:
-        _run_json(js, timeout=40)
-        return True
-    except Exception as e:
-        log(f"整页截图失败：{e}", "WARN")
-        return False
+def _exam_op(body: str, timeout: int = 30) -> dict:
+    """在试卷新标签页上执行操作（page 上下文自动定位 stuExamWeb 页）。"""
+    js = (
+        "async (page) => {\n"
+        "  const pages = page.context().pages()"
+        ".filter(p => p.url().includes('stuExamWeb'));\n"
+        "  const exam = pages[pages.length - 1];\n"  # 最新一张（防陈旧标签）
+        "  if (!exam) return JSON.stringify({error: 'no-exam-page'});\n"
+        "  await exam.bringToFront();\n"
+        + body +
+        "\n}"
+    )
+    return _run_json(js, timeout=timeout)
 
 
-# ── 填答 / 提交（真实点击）─────────────────────────────────────────
+def wait_for_exam_page(timeout_s: float = 15.0) -> bool:
+    """等待章测新标签页出现（点击入口后轮询）。"""
+    deadline = time.time() + timeout_s
+    probe = ("async (page) => {\n"
+             "  const ok = page.context().pages()"
+             ".some(p => p.url().includes('stuExamWeb'));\n"
+             "  return JSON.stringify({ok});\n"
+             "}")
+    while time.time() < deadline:
+        try:
+            if _run_json(probe, timeout=10).get("ok"):
+                return True
+        except Exception:
+            pass
+        time.sleep(1.0)
+    return False
 
 
-def _click_option(global_nth: int, what: str) -> bool:
-    """按全局 nth 点击选项节点（与抽取 JS 同链，索引口径一致）。"""
-    try:
-        from core.browser.engine import pw
-        pw("click", f"{_OPTION_CSS} >> nth={global_nth}",
-           timeout=10)
-        return True
-    except Exception as e:
-        log(f"点击 {what} 失败：{e}", "WARN")
-        return False
+def exam_page_info() -> dict:
+    """读试卷页概要（URL/已交卷标记/可见题）。"""
+    return _exam_op(
+        "  await exam.waitForTimeout(1200);\n"
+        "  const r = await exam.evaluate(() => {\n"
+        "    const cnt = (sel) => document.querySelectorAll(sel).length;\n"
+        "    return JSON.stringify({\n"
+        "      url: location.href,\n"
+        "      subjects: cnt('.examPaper_subject'),\n"
+        "      submitted: /已(提交|完成)|得分/.test((document.body.innerText || '').slice(0, 2000)),\n"
+        "      bodyHead: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 200),\n"
+        "    });\n"
+        "  });\n"
+        "  return r;")
 
 
-def fill_answers(questions: list, answers: list) -> int:
-    """按 AI 答案填答，返回成功填答的题数。
+def read_current_question() -> dict:
+    """读当前可见题：屏幕题号 + 题型文本 + 选项（字母/文本）。"""
+    return _exam_op(
+        "  await exam.waitForTimeout(1500);\n"
+        "  const r = await exam.evaluate(() => {\n"
+        "    const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();\n"
+        "    const vis = [...document.querySelectorAll('.examPaper_subject')].find(s => {\n"
+        "      const cs = getComputedStyle(s); const rect = s.getBoundingClientRect();\n"
+        "      return cs.display !== 'none' && rect.height > 0;\n"
+        "    });\n"
+        "    if (!vis) return JSON.stringify({noVisible: true});\n"
+        "    const typeEl = vis.querySelector('.subject_type_describe');\n"
+        "    const numEl = vis.querySelector('.subject_num span');\n"
+        "    const opts = [...vis.querySelectorAll('.nodeLab')].map(n => {\n"
+        "      const letter = clean((n.querySelector('span.mr10') || {}).textContent).replace('.', '');\n"
+        "      const text = clean((n.querySelector('.examquestions-answer') || n).textContent);\n"
+        "      return {letter: letter.slice(0, 2), text: text.slice(0, 100)};\n"
+        "    });\n"
+        "    return JSON.stringify({\n"
+        "      num: clean(numEl ? numEl.textContent : '').replace('.', ''),\n"
+        "      typeText: clean(typeEl ? typeEl.textContent : ''),\n"
+        "      stemText: clean((vis.querySelector('.subject_describe') || {}).textContent).slice(0, 200),\n"
+        "      options: opts,\n"
+        "    });\n"
+        "  });\n"
+        "  return r;")
 
-    - single/judge：单击对应选项（judge 由「正确/错误」映射序号）
-    - multi：逐个点击字母对应项
-    - fill：经快照 textbox ref 填写；找不到输入框则留空告警
-    - essay：留空（AI 不做简答提交，降低风险）
+
+def screenshot_current_question(path: str) -> bool:
+    """截当前题整块（题干加密渲染，截图供 AI 视觉作答；JS 仅截图不改状态）。"""
+    safe = path.replace("\\", "/").replace("'", "\\'")
+    return _exam_op(
+        "  const vis = exam.locator('.examPaper_subject:visible').first();\n"
+        f"  await vis.screenshot({{path: '{safe}'}});\n"
+        "  return JSON.stringify({ok: true});", timeout=40).get("ok", False)
+
+
+def click_option_letter(letter: str) -> bool:
+    """真实点击当前题指定字母的选项。
+
+    字母 span（.mr10）文本恰为「A.」/「B.」——按它过滤再点所在 .label；
+    不能用 /^A\\./ 锚定 nodeLab 文本（DOM 标签间空白让 ^ 失配 → 空集超时，
+    真机第九轮实测教训）。
     """
-    by_index = {a.get("index"): a.get("answer") for a in answers}
-    filled = 0
-    offset = 0
-    for i, q in enumerate(questions, 1):
-        qtype = q.get("type", "single")
-        opts = q.get("options", [])
-        answer = by_index.get(i)
-        ok = False
-        if qtype in ("single", "multi"):
-            letters = parse_answer_letters(answer)
-            for letter in letters:
-                nth = offset + (ord(letter) - ord("A"))
-                if 0 <= nth - offset < len(opts):
-                    ok = _click_option(nth, f"第{i}题选项{letter}") or ok
-                    human_delay(0.6, 0.15)
-        elif qtype == "judge":
-            idx = judge_answer_index(answer)
-            if 0 <= idx < len(opts):
-                ok = _click_option(offset + idx, f"第{i}题判断项{idx}")
-                human_delay(0.6, 0.15)
-        elif qtype == "fill":
-            ok = _fill_blank_by_snapshot(i, str(answer or ""))
-        else:
-            log(f"第{i}题为简答，留空（essay 不提交）")
-        if ok:
-            filled += 1
-        offset += len(opts)
-    return filled
+    return _exam_op(
+        "  const vis = exam.locator('.examPaper_subject:visible').first();\n"
+        f"  const span = vis.locator('span.mr10').filter({{hasText: '{letter}.'}}).first();\n"
+        "  const label = span.locator('xpath=ancestor::div[contains(@class, \"label\")][1]');\n"
+        "  await label.click({timeout: 8000});\n"
+        "  await exam.waitForTimeout(300);\n"
+        "  return JSON.stringify({ok: true});").get("ok", False)
 
 
-def _fill_blank_by_snapshot(question_no: int, text: str) -> bool:
-    """填空题：经快照 textbox ref 填写（首个文本框）。"""
-    if not text:
-        return False
+def click_next_question() -> bool:
+    """真实点击「下一题」按钮（仅真按钮；末题按钮禁用时返回 False）。
+
+    真机教训：text=下一题 会先命中橙色提示文案「请点【下一题】保存答案」
+    （点击成功但无效果）→ 末题死循环空烧 AI。改为 getByRole('button')
+    限定真按钮，并先探其可用性。
+    """
     try:
-        snap = pw_snapshot()
+        return _exam_op(
+            "  const btn = exam.getByRole('button', {name: /下一题/}).first();\n"
+            "  const enabled = await btn.isEnabled().catch(() => false);\n"
+            "  if (!enabled) return JSON.stringify({ok: false, reason: 'disabled'});\n"
+            "  await btn.click({timeout: 8000});\n"
+            "  await exam.waitForTimeout(800);\n"
+            "  return JSON.stringify({ok: true});").get("ok", False)
     except Exception as e:
-        log(f"填空题快照失败：{e}", "WARN")
-        return False
-    m = re.search(r"- (?:textbox|editable)[^\n]*\[ref=(e\d+)\]", snap)
-    if not m:
-        log(f"第{question_no}题未找到可填文本框，留空", "WARN")
-        return False
-    try:
-        from core.browser.engine import pw_fill
-        pw_fill(m.group(1), text)
-        human_delay(0.5, 0.1)
-        return True
-    except Exception as e:
-        log(f"填空题填写失败：{e}", "WARN")
+        log(f"点击下一题失败：{e}", "WARN")
         return False
 
 
 def submit_exam() -> bool:
-    """提交测验（快照文本定位提交/交卷按钮 + 确认弹窗）。"""
-    snap = pw_snapshot()
-    ref = (find_ref_by_text(snap, "提交")
-           or find_ref_by_text(snap, "交卷")
-           or find_ref_by_text(snap, "确定提交"))
-    if not ref:
-        log("未找到提交按钮", "ERROR")
+    """真实提交试卷（「提交作业」+ 确认弹窗）。grade_only 永不调用。"""
+    try:
+        ok = _exam_op(
+            "  await exam.locator('text=提交作业').first().click({timeout: 8000});\n"
+            "  await exam.waitForTimeout(1500);\n"
+            "  const confirm = exam.locator('text=确定').first();\n"
+            "  try { await confirm.click({timeout: 3000}); } catch (e) {}\n"
+            "  return JSON.stringify({ok: true});", timeout=40).get("ok", False)
+        return ok
+    except Exception as e:
+        log(f"提交失败：{e}", "ERROR")
         return False
-    pw_click(ref)
-    human_delay(2.0, 0.25)
-    confirm_snap = pw_snapshot()
-    confirm_ref = find_ref_by_text(confirm_snap, "确定") or find_ref_by_text(confirm_snap, "确认")
-    if confirm_ref:
-        pw_click(confirm_ref)
-        human_delay(1.0, 0.3)
-    return True
+
+
+def close_exam_page() -> None:
+    """关掉试卷标签页，回到学习页（真实页面操作）。"""
+    try:
+        _exam_op(
+            "  await exam.close();\n"
+            "  const study = page.context().pages()"
+            ".find(p => p.url().includes('stuStudy'));\n"
+            "  if (study) await study.bringToFront();\n"
+            "  return JSON.stringify({ok: true});")
+    except Exception as e:
+        log(f"关闭试卷页失败：{e}", "WARN")
 
 
 # ── 求解器主体 ──────────────────────────────────────────────────────
 
 
 class ZhihuishuQuizSolver:
-    """完成一门课的章节测验/作业（章树真实点击 → 逐节抽取/AI/填答/提交）。"""
+    """完成一门课的章节测验/作业（章树真实点击 → 逐题截图/AI/填答/提交）。"""
 
     def __init__(self, course: dict, dry_run: bool = False,
                  grade_only: bool = False):
@@ -335,10 +356,10 @@ class ZhihuishuQuizSolver:
 
         for i, sec in enumerate(sections, 1):
             check_signals()
-            log(f"[ZHS-Quiz] ({i}/{len(sections)}) {sec['name']}")
+            log(f"[ZHS-Quiz] ({i}/{len(sections)}) {sec['name']}（入口 #{sec['idx']}）")
             self.stats["sections"] += 1
             try:
-                ok = self._solve_section(sec["name"])
+                ok = self._solve_section(sec["idx"], sec["name"])
             except Exception as e:
                 # 单节失败（如 AI 密钥缺失/网络异常）只计失败，不炸整个账号运行
                 log(f"「{sec['name']}」求解异常：{e}", "ERROR")
@@ -356,7 +377,7 @@ class ZhihuishuQuizSolver:
         return self.stats["failed"] == 0
 
     def _pending_quiz_sections(self) -> list:
-        """从章节树提取测验入口（li.chapter-test，含文本用于真实点击定位）。"""
+        """从章节树提取测验入口（li.chapter-test，含 nth 索引用于真实点击）。"""
         js = """
 async (page) => {
   const r = await page.evaluate(() => {
@@ -377,100 +398,124 @@ async (page) => {
             return []
         return [s for s in data.get("items", []) if s.get("name")]
 
-    def _solve_section(self, section_name: str) -> bool:
-        # 1. 真实点击章测入口（text 选择器唯一匹配小节名）
+    def _solve_section(self, idx: int, section_name: str) -> bool:
+        # 1. 清扫拦截弹窗（课程提醒/学前必读会吃掉入口点击——真机实测），
+        #    然后真实点击章测入口（处理器在内层 .name 上：点 li 本体不触发）
+        from platforms.zhihuishu.video import _dismiss_blocking_dialogs
+        _dismiss_blocking_dialogs()
+        human_delay(0.5, 0.1)
         try:
             from core.browser.engine import pw
-            pw("click", f"text={section_name}", timeout=10)
+            pw("click", f"li.chapter-test .name >> nth={idx}", timeout=10)
         except Exception as e:
-            log(f"点击测验入口「{section_name}」失败：{e}", "WARN")
+            log(f"点击测验入口 #{idx}「{section_name}」失败：{e}", "WARN")
             return False
-        human_delay(4.0, 0.5)
+        human_delay(3.0, 0.5)
 
-        # 2. 抽取题面（等待渲染；超时按无内容/已交卷处理）
-        questions_raw = []
-        for _ in range(3):
-            questions_raw = extract_exam_questions()
-            if questions_raw:
-                break
-            human_delay(2.0, 0.3)
-        if not questions_raw:
-            snap = ""
-            try:
-                snap = pw_snapshot()
-            except Exception:
-                pass
-            score = parse_score(snap)
-            if score is not None:
-                log(f"「{section_name}」已交卷（得分 {score}），跳过")
-                self.stats["skipped"] += 1
-            else:
-                log(f"「{section_name}」未发现题面（可能为非测验内容），跳过", "WARN")
-                self.stats["skipped"] += 1
-            self._back_to_tree()
+        # 2. 等试卷新标签页（真机实测：章测在新标签页打开 stuExamWeb）
+        if not wait_for_exam_page(timeout_s=15):
+            log(f"「{section_name}」未打开试卷页（可能为非测验内容），跳过", "WARN")
+            self.stats["skipped"] += 1
+            return True
+        info = exam_page_info()
+        url = info.get("url", "")
+        if "/dohomework/" not in url:
+            # 列表页形态（#/webExamList?recruitId=）：v1 不深入，跳过并留档
+            log(f"「{section_name}」打开的是试卷列表页而非具体试卷：{url[:80]}", "WARN")
+            self.stats["skipped"] += 1
+            close_exam_page()
+            return True
+        if info.get("submitted") or int(info.get("subjects", 0)) < 1:
+            log(f"「{section_name}」已交卷或无题面，跳过")
+            self.stats["skipped"] += 1
+            close_exam_page()
             return True
 
-        questions = []
-        for q in questions_raw:
-            questions.append({
-                "type": detect_question_type(q.get("typeText", ""),
-                                             len(q.get("options", []))),
-                "stem": q.get("stem", ""),
-                "options": q.get("options", []),
-            })
-
-        # 3. AI 作答（文本优先；题干为空走截图兜底）
-        if all(q["stem"] for q in questions):
-            from core.ai.router import ai_solve_quiz
-            answers = ai_solve_quiz(build_ai_questions(questions),
-                                    self.course.get("name", ""),
-                                    section_name)
-        else:
-            answers = self._solve_by_screenshot(section_name)
-
-        # 4. 填答
-        filled = fill_answers(questions, answers or [])
-        log(f"「{section_name}」填答 {filled}/{len(questions)} 题")
-
-        # 5. 提交（grade_only 绝不提交——人工接管）
-        if self.grade_only:
-            log(f"[ZHS-Quiz] 模拟运行：「{section_name}」已填答未提交"
-                f"（{self.course.get('name', '')}），请人工检查后接管")
-            self._back_to_tree()
-            return True
-
-        if not submit_exam():
-            log(f"「{section_name}」提交失败", "ERROR")
-            self._back_to_tree()
-            return False
-        human_delay(2.5, 0.5)
+        # 3. 逐题：读题型/选项（DOM 明文）→ 截图题干（加密渲染）→ AI 视觉 → 填答 → 下一题
+        #    任何退出路径都留档+关试卷页，防陈旧标签让下一节错拿旧卷（第九轮教训）
+        from core.ai.router import ai_solve_quiz_image
+        answered, total = 0, 0
+        q_no = 0
+        submitted_ok = False
+        last_screen_num = ""
         try:
-            score = parse_score(pw_snapshot())
-            log(f"「{section_name}」已提交{f'（得分 {score}）' if score is not None else ''}")
-        except Exception:
-            log(f"「{section_name}」已提交")
-        self._back_to_tree()
-        return True
+            while True:
+                q_no += 1
+                check_signals()
+                q = read_current_question()
+                if q.get("noVisible") or not q.get("options"):
+                    log(f"第 {q_no} 题不可见或无选项，停止本卷", "WARN")
+                    break
+                # 防死循环（第十轮教训）：点过「下一题」后屏幕题号不变 = 已到
+                # 末题或翻页失效——该题首读时已作答，直接收卷，不再空烧 AI。
+                screen_num = str(q.get("num", "")).strip()
+                if screen_num and screen_num == last_screen_num:
+                    log(f"屏幕题号停在 {screen_num}（翻页无效），按末题收卷")
+                    break
+                last_screen_num = screen_num
+                total += 1
+                opts = q["options"]
+                letters = [o["letter"] for o in opts]
+                texts = [o["text"] for o in opts]
+                qtype = detect_question_type(q.get("typeText", ""), len(opts))
 
-    def _solve_by_screenshot(self, section_name: str) -> list:
-        """截图兜底：整页截图 → AI 视觉作答（题干反爬/富文本时）。"""
+                TMP_DIR.mkdir(parents=True, exist_ok=True)
+                shot = str(TMP_DIR / f"zhs_quiz_q{q_no}.png")
+                answer = None
+                if screenshot_current_question(shot):
+                    try:
+                        answers = ai_solve_quiz_image([shot], self.course.get("name", ""),
+                                                      section_name)
+                        answer = answers[0].get("answer") if answers else None
+                    except Exception as e:
+                        log(f"第 {q_no} 题 AI 作答失败：{e}", "WARN")
+                else:
+                    log(f"第 {q_no} 题截图失败", "WARN")
+
+                picked = map_answer_to_letters(answer, qtype, letters, texts)
+                log(f"第 {q_no} 题（{qtype}）AI={answer} → 点 {picked or '留空'}")
+                ok_click = False
+                for letter in picked:
+                    if click_option_letter(letter):
+                        ok_click = True
+                        human_delay(0.8, 0.2)
+                        if qtype != "multi":
+                            break  # 单选/判断一次点击；多选逐个点
+                    else:
+                        log(f"点击选项 {letter} 失败", "WARN")
+                if ok_click:
+                    answered += 1
+
+                if not click_next_question():
+                    log("无「下一题」（已到最后一题）")
+                    break
+                human_delay(2.2, 0.4)  # 等题干异步渲染
+
+            log(f"「{section_name}」填答 {answered}/{total} 题")
+
+            # 4. 提交（grade_only 绝不提交/暂存——人工接管）
+            if self.grade_only:
+                log(f"[ZHS-Quiz] 模拟运行：「{section_name}」已填答未提交"
+                    f"（{self.course.get('name', '')}），请人工检查后接管")
+            elif total > 0 and submit_exam():
+                human_delay(2.5, 0.5)
+                log(f"「{section_name}」已提交")
+                submitted_ok = True
+            elif total > 0:
+                log(f"「{section_name}」提交失败", "ERROR")
+        finally:
+            if total > 0:
+                self._capture_paper_screenshot(section_name)
+            close_exam_page()
+        return submitted_ok if not self.grade_only else True
+
+    def _capture_paper_screenshot(self, section_name: str) -> None:
+        """留档：交卷前的答题卡/完成率整页截图（人工核对用；grade-only 关键证据）。"""
         TMP_DIR.mkdir(parents=True, exist_ok=True)
-        path = str(TMP_DIR / "zhs_quiz_fallback.png")
-        if not _fullpage_screenshot(path):
-            return []
+        safe = str(TMP_DIR / "zhs_quiz_paper_final.png").replace("\\", "/").replace("'", "\\'")
         try:
-            from core.ai.router import ai_solve_quiz_image
-            answers = ai_solve_quiz_image([path],
-                                          self.course.get("name", ""),
-                                          section_name)
-            log(f"「{section_name}」截图兜底作答 {len(answers)} 题")
-            return answers
-        except Exception as e:
-            log(f"截图兜底作答失败：{e}", "WARN")
-            return []
-
-    def _back_to_tree(self) -> None:
-        """返回章节树（重新导航学习页，真实导航）。"""
-        pw_goto(build_study_url(self.recruit_id, self.course_id))
-        human_delay(3.0, 0.4)
-        scroll_load_chapter_tree()
+            _exam_op(
+                f"  await exam.screenshot({{path: '{safe}', fullPage: false}});\n"
+                "  return JSON.stringify({ok: true});", timeout=40)
+        except Exception:
+            pass  # 留档尽力而为

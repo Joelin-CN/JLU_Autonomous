@@ -13,7 +13,8 @@ from platforms.zhihuishu.solvers.quiz import (
     ZhihuishuQuizSolver,
     build_ai_questions,
     detect_question_type,
-    judge_answer_index,
+    judge_answer_text,
+    map_answer_to_letters,
     parse_answer_letters,
     parse_reveal_letters,
     parse_score,
@@ -49,16 +50,36 @@ class TestParseAnswerLetters:
         assert parse_answer_letters(None) == []
 
 
-class TestJudgeAnswerIndex:
+class TestJudgeAnswerText:
     def test_mapping(self):
-        assert judge_answer_index("正确") == 0
-        assert judge_answer_index("对") == 0
-        assert judge_answer_index("错误") == 1
-        assert judge_answer_index("错") == 1
+        assert judge_answer_text("正确") == "对"
+        assert judge_answer_text("对") == "对"
+        assert judge_answer_text("错误") == "错"
+        assert judge_answer_text("错") == "错"
 
     def test_unparseable(self):
-        assert judge_answer_index("B") == -1
-        assert judge_answer_index([]) == -1
+        assert judge_answer_text("B") == ""
+        assert judge_answer_text([]) == ""
+
+
+class TestMapAnswerToLetters:
+    """选项随机排列（真机实测页面明示），AI 答案须按选项内容/字母映射。"""
+
+    def test_choice_letters_intersect_available(self):
+        # AI 答 AC，页面只有 A/B/D（C 不存在）→ 只点 A
+        assert map_answer_to_letters("AC", "single",
+                                     ["A", "B", "D"], ["x", "y", "z"]) == ["A"]
+
+    def test_judge_maps_by_option_text(self):
+        # 判断题选项随机：A=错 B=对；AI 答「正确」→ B
+        assert map_answer_to_letters("正确", "judge",
+                                     ["A", "B"], ["错", "对"]) == ["B"]
+        assert map_answer_to_letters("错误", "judge",
+                                     ["A", "B"], ["错", "对"]) == ["A"]
+
+    def test_no_match(self):
+        assert map_answer_to_letters(None, "judge", ["A", "B"], ["对", "错"]) == []
+        assert map_answer_to_letters("Z", "single", ["A", "B"], ["x", "y"]) == []
 
 
 class TestParseScore:
