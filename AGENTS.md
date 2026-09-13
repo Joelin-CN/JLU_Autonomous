@@ -116,6 +116,7 @@ JLU_Autonomous/
 - 提交前用 `git status` 确认只包含本次变更相关文件；`data/`、`references/` 内容不得入提交。
 - 涉及接口或架构变更时，先同步 `docs/design/` 对应文档。
 - AI 代理执行 git 写操作（add / commit / push）需在该管理者授权的分支范围内进行；合并到 `main` 只能通过 PR。
+- **分支边界红线（2026-09-13 起）**：AI 代理的一切改动只推送到当前授权的工作分支（如 `feature/parallel-platform-jobs`）。**未经管理者本人当次明确许可，禁止以任何方式改动 `main`**——包括但不限于：admin squash/merge、rebase/merge 到 `main`、临时关闭分支保护（`enforce_admins` / `allow_force_pushes`）后强推或合并。历史上的合并授权（哪怕同一会话内给过）**不延续**到后续操作，每次涉及 `main` 的动作必须单独确认；对「合并 PR」「把分支合起来」等指令有歧义时，先确认语义再动手。
 
 ## 验证驱动开发
 
