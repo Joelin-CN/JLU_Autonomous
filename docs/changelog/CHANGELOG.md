@@ -2,6 +2,13 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-14 — E2E 轮 1（真实前端按钮）：全链路通 + 抓修 3 个渲染层缺陷
+
+- **E2E（智慧树「仅刷题」+ 模拟运行，真实账号）**：按钮 → spawn → 课程过滤 → solver → DeepSeek 逐题视觉作答 → 草稿 9/10 未提交；已交卷/列表页形态优雅跳过；整单 solved 1/skipped 5/failed 0。前置全链路审核报告：`docs/reports/analysis/E2E_AUDIT_M4_CHAIN_2026-09-14.md`。
+- **E2E 抓到并修复 3 缺陷**（4691bad5/9bb3e9d8）：智慧树 argparse 缺 `--courses`（选中课程启动即 SystemExit）；`_map_course` 缺 `id` 字段（渲染层 id="undefined" → 过滤静默清空课程、答题段被跳过）；`progress` "2%" 字符串直传（课程卡 NaN%）。
+- **新已知问题**：选项「读取-点击」竞态（读字母后 DOM 重排致点击落错，选中校验捕获；待改按内容点击）。
+- 门禁：pytest `tests/platforms` **45 passed**（+3 课程映射）。轮 2（真实提交版）待 PR #6 合入后执行。
+
 ## 2026-09-13（续五）— M4 填空题支持 + 真实提交链路验证：绪论单元测试满分 20/20
 
 - **填空题支持**：无选项题（此前会触发「不可见或无选项」中断整卷）按题型分流——fill 走「截图题干 → DeepSeek 视觉 → sanitize_fill_text（首行/限长 500）→ 题块内 textarea/可见 input 填写（locator.fill 真实输入）」；essay 仍留空。单测 +3。
