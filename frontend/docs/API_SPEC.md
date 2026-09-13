@@ -22,12 +22,17 @@
 ```typescript
 // Electron 层入参（ipcClient 在发送时附带 objective/strategy/options，但 handler 仅读取下列字段）
 interface StartJobPayload {
-  platform?: Platform          // 目标平台（默认 chaoxing）——决定后端入口与槽位归属
+  platform?: 'chaoxing' | 'zhihuishu'   // 目标平台，缺省 'chaoxing'。决定后端入口
+                                        // python -m platforms.<platform>.api 与凭据文件
   accountIds: number[]
   courseIds?: string[]
   mode?: 'full' | 'scan_only' | 'solve_only'
 }
 ```
+
+平台路由（M1 多平台架构）：`platform='zhihuishu'` 时主进程注入 `ZHIHUISHU_ACCOUNTS_FILE`（默认
+`data/passwords/zhihuishu.txt`）与可选 `ZHIHUISHU_HEADED`；浏览器会话 `{platform}-chrome-{N}` 与档案目录
+`chrome-profiles/<platform>/account-N/` 按平台隔离。NDJSON stdout 事件协议两平台一致（无 breaking change）。
 
 校验：`accountIds` 非空、≤50、正整数；RAM 安全检查（全局预算 = (总内存−基线)×75%，双平台并行时按**动态剩余分账**取本任务份额，`--system-limit-gb` 恒全机值）；**同平台互斥、跨平台并行**（每平台一个执行槽位，见 `ipc/jobSlots.ts`）；500ms 限流。
 
@@ -92,9 +97,11 @@ type JobPhase =
 #### `courses:scan` — 扫描课程
 
 ```
-请求: ScanCoursesPayload { accountIds: number[], courseIds?: string[] }
+请求: ScanCoursesPayload { accountIds: number[], courseIds?: string[], platform?: 'chaoxing' | 'zhihuishu' }
 响应: Course[]
 ```
+
+`platform` 缺省 `chaoxing` —— spawn `python -m platforms.<platform>.courses --account N` 按平台读取发现文件；zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`。
 
 #### `courses:list` — 获取账号课程列表
 

@@ -18,7 +18,7 @@
 - **新观察项（记档未修）**：`core/memory.py` MemoryMonitor 线程无异常兜底（多 Chrome 时 CIM 采样 20s 超时→监视线程死亡，gate 采样 fail-open 不受影响，建议后续加 try/except 降级）；扫码工单倒计时 `NaN:NaN`；占位联测需先移开共享 profile 的 `storage-state.json`（本轮首轮曾恢复旧 Cookie 做登录态验证，未做任何学习操作即停止，文件已测后还原）。
 - 文档：验证清单补 P0-8~P0-12 真机联测条目与记录。
 
-## 2026-09-12（续五）— 双平台并行任务执行（后端编排 + 渲染层多任务）
+## 2026-09-12（续六）— 双平台并行任务执行（后端编排 + 渲染层多任务）
 
 - **同平台互斥、跨平台并行**：Electron 主进程从全局单任务（`activeJobId` + 单 `bridge`）重构为 **per-platform 槽位表**（`ipc/jobSlots.ts` 纯逻辑模块，vitest 可测）：`job:start` 按平台判占用（另一平台任务不阻塞）；pause/resume/stop/resolve-ticket 按 `jobId` 路由到对应槽位 bridge；进程 done/exit 经 `releaseIfCurrent` 身份守卫释放槽位（防旧进程迟到事件误清）；应用退出 `stopAllJobs()` 遍历全部槽位。IPC 通道名与 NDJSON 8 事件协议不变。
 - **内存动态剩余分账（策略 B）**：`memory/planner.ts#allocateBudget`——独跑拿全额预算（现状不变）；后启任务份额 = `clamp(全局预算 − 其他平台已授予, 最低保障 1 账号, 全局预算)`，`--max-concurrent` 按份额重算；授予额允许受控超卖，但两平台 Python 闸门实测全局 Chrome 占用（profile 同根）天然收敛，`--system-limit-gb` 恒全机值两进程共用 fail-closed 急停线——**总占用不超单机预算红线可守**。
@@ -26,6 +26,17 @@
 - **事件 platform 盖章 + 工单路由**：8 类事件主进程转发时统一注入 `platform`（additive）；`job:resolve-ticket` 载荷新增可选 `jobId`（双任务时路由到对应平台进程，缺省回落唯一活跃任务，不透传 Python）；`closeBrowserSessions` 调用点补传 `job.platform`（修「停智慧树任务误关超星会话」存量 bug）；`jobState.isJobActive(platform?)` 派生自槽位表——账号增删改按平台锁，设置/AI 配置全局锁。
 - **渲染层多任务化**：`execution.store` 槽位化（`Record<Platform, Slot>` 各持 jobId/lanes/phases/计时，事件按 `event.jobId` 路由；任务完成课程回读带任务自己的平台，修课程桶错读）；执行页按平台分组双 banner（各自控制按钮/统计）；侧栏运行中**允许**切换平台（数据分桶使切换安全）；课程总览启动按钮改「同平台运行中」禁用；`memory.store` 按平台分桶；ipcClient 单 `currentHandle` → 按 jobId Map（platform 回填不再串）；mock 层单仿真 → `simulations Map`（同平台替换/跨平台并存，事件带 jobId+platform）。
 - **验证**：后端 `pytest tests/unit` **618 passed**；前端 typecheck 0 错误 + vitest **50 passed**（新增 jobSlots 槽位 6 例 / allocateBudget 分账 5 例 / mockClient 双任务生命周期 4 例 / execution.store 双槽路由 4 例）；dev mock 双确认：双 banner 分组渲染、组内暂停/继续独立生效（暂停智慧树组不影响超星组）、运行中切平台、超星验证码 + 智慧树扫码工单分别弹出、完成回读日志带平台标签——视口截图经 vision 分析无布局缺陷。文档：api.md v1.6 / architecture.md 并行执行章节 / 验证清单。
+
+## 2026-09-12（续五）— 文档债务清偿：多平台架构全量同步（不含代码）
+
+- **api.md v1.5**：补 `StartJobPayload.platform` / `ScanCoursesPayload.platform`、spawn 路由（`platforms.<platform>.api|accounts|courses`）、`ZHIHUISHU_ACCOUNTS_FILE` / `ZHIHUISHU_HEADED` env 白名单、`accounts:default-path` 按平台返回、NDJSON 8 事件**无 breaking change** 声明；注明渲染层 preload 平台透传未合入 main 的现状。
+- **architecture.md v2.0**：从 2026-06 单包全景重写为 core/ + platforms/{chaoxing,zhihuishu} + chaoxing/ 垫片多平台布局；新增智慧树链路要点（storageState 免扫码、三弹窗自动化、D6 原速、弹题答案揭示、锁课红线）；移除已删的 DeepSeek Web 详图与个人课程状态表。
+- **frontend/docs/API_SPEC.md**：对照 main preload 实际签名同步 platform 字段。
+- **根 README**：智慧树矩阵改分项实况（登录/扫描 ✅、视频 ✅、答题 M4 🚧、滑块专项 🚧）。
+- **AGENTS.md v0.3**（代理规范单一事实源）：目录树 backend 行与后端入口更新为多平台布局；智慧树概况同步。
+- **backend/README.md**：双平台简介、`platforms.*` 入口示例、`zhihuishu.txt` 凭据格式、core/platforms 结构树。**frontend/README.md**：多平台架构贯通位说明。
+- **docs/README.md**：登记两份 M0 调研报告与 M1/M2 验证清单；roadmap 描述更新。
+- 范围约定：仅描述已合入 main 的能力；「JLU 学习助手」品牌与渲染层平台切换 UI 随前端多平台 PR（#3）文档同步，不在本 PR 抢跑。
 
 ## 2026-09-12（续四）— 前端多平台 UI 重构：品牌通用化 + 平台一级维度 + 工单三形态
 
