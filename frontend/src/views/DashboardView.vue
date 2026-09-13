@@ -5,8 +5,9 @@
         <div class="stat-card__inner">
           <span class="stat-icon stat-icon--accent">👥</span>
           <div>
-            <div class="stat-value stat-value--accent">{{ accountStore.accounts.length }}</div>
+            <div class="stat-value stat-value--accent">{{ totalAccountCount }}</div>
             <div class="stat-label">账号总数</div>
+            <div class="stat-sub">{{ accountBreakdown }}</div>
           </div>
         </div>
       </GlassmorphicCard>
@@ -17,6 +18,7 @@
           <div>
             <div class="stat-value stat-value--gold">{{ runningCount }}</div>
             <div class="stat-label">运行中账号</div>
+            <div class="stat-sub">{{ runningPlatformLabel }}</div>
           </div>
         </div>
       </GlassmorphicCard>
@@ -27,6 +29,7 @@
           <div>
             <div class="stat-value stat-value--ok">{{ doneCount }}</div>
             <div class="stat-label">完成课程</div>
+            <div class="stat-sub">{{ doneBreakdown }}</div>
           </div>
         </div>
       </GlassmorphicCard>
@@ -75,21 +78,33 @@
       <GlassmorphicPanel class="panel" padding="20px">
         <div class="panel__header">
           <span class="panel__title">账号状态</span>
-          <span class="panel__sub">{{ onlineCount }}/{{ accountStore.accounts.length }} 在线</span>
+          <span class="panel__sub">{{ onlineCount }}/{{ totalAccountCount }} 在线</span>
         </div>
-        <div class="dot-matrix">
-          <div
-            v-for="account in accountStore.accounts"
-            :key="account.id"
-            class="account-dot"
-            :class="dotStatus(account.id, account.status)"
-            @mouseenter="hoveredDot = account.id"
-            @mouseleave="hoveredDot = null"
-          >
-            {{ account.id.slice(-2) }}
-            <div v-if="hoveredDot === account.id" class="dot-tooltip">
-              {{ maskPhone(account.username) }} · {{ statusLabel(account.id, account.status) }}
+        <!-- 点阵按平台分块（数据已按平台分桶；运行状态只对运行中平台有意义） -->
+        <div v-for="p in platformStore.platforms" :key="p" class="platform-dots">
+          <div class="platform-dots__head">
+            <span :style="{ color: platformStore.metaFor(p).color }">
+              {{ platformStore.metaFor(p).icon }} {{ platformStore.metaFor(p).label }}
+            </span>
+            <span class="platform-dots__count">{{ platformStore.metaFor(p).shortLabel }} {{ accountStore.accountsFor(p).length }} 个</span>
+          </div>
+          <div v-if="accountStore.accountsFor(p).length" class="dot-matrix">
+            <div
+              v-for="account in accountStore.accountsFor(p)"
+              :key="account.id"
+              class="account-dot"
+              :class="dotStatus(account.id, account.status, p)"
+              @mouseenter="hoveredDot = `${p}:${account.id}`"
+              @mouseleave="hoveredDot = null"
+            >
+              {{ account.id.slice(-2) }}
+              <div v-if="hoveredDot === `${p}:${account.id}`" class="dot-tooltip">
+                {{ maskLogin(account.username) }} · {{ statusLabel(account.id, account.status, p) }}
+              </div>
             </div>
+          </div>
+          <div v-else class="platform-dots__empty">
+            尚未配置{{ platformStore.metaFor(p).label }}账号
           </div>
         </div>
         <div class="dot-legend">
@@ -172,8 +187,11 @@ import { useCourseStore } from '@/app/stores/course.store'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import { useMemoryStore } from '@/app/stores/memory.store'
 import { useLogStore } from '@/app/stores/log.store'
+import { usePlatformStore } from '@/app/stores/platform.store'
 import { createApiClient, isMockMode } from '@/shared/lib/apiClient'
-import type { AccountStatus, Balance, SystemResources } from '@/shared/lib/types'
+import { PLATFORM_META } from '@/shared/lib/platforms'
+import { maskLogin } from '@/shared/lib/mask'
+import type { AccountStatus, Balance, Platform, SystemResources } from '@/shared/lib/types'
 
 const api = createApiClient()
 const mockMode = isMockMode()
@@ -184,6 +202,7 @@ const courseStore = useCourseStore()
 const executionStore = useExecutionStore()
 const memoryStore = useMemoryStore()
 const logStore = useLogStore()
+const platformStore = usePlatformStore()
 
 const hoveredDot = ref<string | null>(null)
 
@@ -259,18 +278,15 @@ async function loadBalance(): Promise<void> {
   }
 }
 
-function maskPhone(phone: string): string {
-  if (phone.length <= 4) return phone
-  if (phone.length <= 7) return `${phone.slice(0, 3)}****`
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
-}
-
-function laneStatus(accountId: string): string | null {
+function laneStatus(accountId: string, platform: Platform): string | null {
+  // Lanes belong to the running job's platform only — the other platform's
+  // dots must not light up as running from stale lane ids.
+  if (executionStore.platform && executionStore.platform !== platform) return null
   return executionStore.lanes.find((lane) => lane.accountId === accountId)?.status ?? null
 }
 
-function dotStatus(accountId: string, accountStatus: AccountStatus): string {
-  const currentLaneStatus = laneStatus(accountId)
+function dotStatus(accountId: string, accountStatus: AccountStatus, platform: Platform): string {
+  const currentLaneStatus = laneStatus(accountId, platform)
   if (currentLaneStatus === 'running' || currentLaneStatus === 'paused') return 'running'
   if (currentLaneStatus === 'completed') return 'done'
   if (currentLaneStatus === 'error' || currentLaneStatus === 'stopped') return 'error'
@@ -279,8 +295,8 @@ function dotStatus(accountId: string, accountStatus: AccountStatus): string {
   return 'idle'
 }
 
-function statusLabel(accountId: string, accountStatus: AccountStatus): string {
-  const currentLaneStatus = laneStatus(accountId)
+function statusLabel(accountId: string, accountStatus: AccountStatus, platform: Platform): string {
+  const currentLaneStatus = laneStatus(accountId, platform)
   if (currentLaneStatus === 'running') return '运行中'
   if (currentLaneStatus === 'paused') return '已暂停'
   if (currentLaneStatus === 'completed') return '已完成'
@@ -292,21 +308,53 @@ function statusLabel(accountId: string, accountStatus: AccountStatus): string {
   return '空闲'
 }
 
+const totalAccountCount = computed(() =>
+  platformStore.platforms.reduce((sum, p) => sum + accountStore.accountsFor(p).length, 0),
+)
+
+/** 账号卡副行：按平台分解（超星 3 · 智慧树 2）。 */
+const accountBreakdown = computed(() =>
+  platformStore.platforms
+    .map((p) => `${PLATFORM_META[p].shortLabel} ${accountStore.accountsFor(p).length}`)
+    .join(' · '),
+)
+
+const runningPlatformLabel = computed(() => {
+  if (!executionStore.isRunning) return '空闲'
+  return executionStore.platform
+    ? `${PLATFORM_META[executionStore.platform].label}任务`
+    : '任务运行中'
+})
+
 const onlineCount = computed(() =>
-  accountStore.accounts.filter((account) => account.status === 'online').length,
+  platformStore.platforms.reduce(
+    (sum, p) => sum + accountStore.accountsFor(p).filter((a) => a.status === 'online').length,
+    0,
+  ),
 )
 
 const runningCount = computed(() =>
   executionStore.lanes.filter((lane) => lane.status === 'running').length,
 )
 
-const doneCount = computed(() => {
+/** 完成课程按平台分解（含全部平台分桶；键为 platform:accountId）。 */
+function doneCountFor(platform: Platform): number {
+  const prefix = `${platform}:`
   let count = 0
-  for (const courses of Object.values(courseStore.coursesByAccount)) {
+  for (const [key, courses] of Object.entries(courseStore.coursesByAccount)) {
+    if (!key.startsWith(prefix)) continue
     count += courses.filter((course) => course.progress >= 100).length
   }
   return count
-})
+}
+
+const doneCount = computed(() =>
+  platformStore.platforms.reduce((sum, p) => sum + doneCountFor(p), 0),
+)
+
+const doneBreakdown = computed(() =>
+  platformStore.platforms.map((p) => `${PLATFORM_META[p].shortLabel} ${doneCountFor(p)}`).join(' · '),
+)
 
 // Live system resources — polled every 2s from the Electron main process
 // (Node `os`), or the mock client in browser mode. Replaces the previous
@@ -369,8 +417,17 @@ onMounted(async () => {
   void loadDeepseekBalance()
   void pollResources()
   resourcesTimer = setInterval(pollResources, 2000)
-  await Promise.all([accountStore.fetchAccounts(), attentionStore.fetchTickets()])
-  await Promise.all(accountStore.accounts.map((account) => courseStore.fetchCourses(account.id)))
+  // Dashboard aggregates BOTH platforms — load both buckets (fetchAccounts /
+  // fetchCourses cache per platform, so this is a no-op when already loaded).
+  await Promise.all([
+    ...platformStore.platforms.map((p) => accountStore.fetchAccounts(p)),
+    attentionStore.fetchTickets(),
+  ])
+  await Promise.all(
+    platformStore.platforms.flatMap((p) =>
+      accountStore.accountsFor(p).map((account) => courseStore.fetchCourses(account.id, p)),
+    ),
+  )
 })
 
 onUnmounted(() => {
@@ -469,6 +526,43 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.platform-dots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.platform-dots + .platform-dots {
+  margin-top: 10px;
+}
+.platform-dots__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+.platform-dots__count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.platform-dots__empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
 }
 
 .account-dot {

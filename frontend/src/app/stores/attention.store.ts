@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Ticket, TicketSeverity } from '@/shared/lib/types'
+import type { Platform, Ticket, TicketSeverity } from '@/shared/lib/types'
 import { createApiClient } from '@/shared/lib/apiClient'
 
 const api = createApiClient()
@@ -15,6 +15,7 @@ export const useAttentionStore = defineStore('attention', () => {
   const loaded = ref(false)
   const error = ref<string | null>(null)
   const severityFilter = ref<TicketSeverity | 'all'>('all')
+  const platformFilter = ref<Platform | 'all'>('all')
   let pendingFetch: Promise<void> | null = null
 
   /* computed */
@@ -28,8 +29,11 @@ export const useAttentionStore = defineStore('attention', () => {
   )
 
   const filteredTickets = computed(() => {
-    if (severityFilter.value === 'all') return tickets.value
-    return tickets.value.filter((t) => t.severity === severityFilter.value)
+    return tickets.value.filter((t) => {
+      if (severityFilter.value !== 'all' && t.severity !== severityFilter.value) return false
+      if (platformFilter.value !== 'all' && t.platform !== platformFilter.value) return false
+      return true
+    })
   })
 
   const unresolvedCount = computed(() => unresolvedTickets.value.length)
@@ -113,12 +117,17 @@ export const useAttentionStore = defineStore('attention', () => {
     severityFilter.value = severity
   }
 
+  function setPlatformFilter(platform: Platform | 'all'): void {
+    platformFilter.value = platform
+  }
+
   return {
     tickets,
     loading,
     loaded,
     error,
     severityFilter,
+    platformFilter,
     unresolvedTickets,
     criticalTickets,
     filteredTickets,
@@ -128,5 +137,6 @@ export const useAttentionStore = defineStore('attention', () => {
     addTicket,
     upsertTicket,
     setSeverityFilter,
+    setPlatformFilter,
   }
 })

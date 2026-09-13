@@ -34,7 +34,8 @@ app.commandLine.appendSwitch('disable-gpu-compositing')
 // Constants
 // ----------------------------------------------------------------
 
-const APP_NAME = 'chaoxing-assistant'
+const APP_NAME = 'jlu-study-assistant'
+const LEGACY_APP_NAME = 'chaoxing-assistant'
 
 const WINDOW_DEFAULTS = {
   width: 1540,
@@ -42,7 +43,7 @@ const WINDOW_DEFAULTS = {
   minWidth: 1024,
   minHeight: 680,
   show: false, // show after ready-to-show to avoid white flash
-  title: '超星助手 - Chaoxing Assistant',
+  title: 'JLU 学习助手',
   icon: path.join(__dirname, '../build/icon.ico'),
   webPreferences: {
     preload: path.join(__dirname, 'preload.js'),
@@ -157,7 +158,30 @@ function registerAllHandlers(): void {
 // App lifecycle
 // ----------------------------------------------------------------
 
+/**
+ * One-time userData migration from the legacy brand (chaoxing-assistant) to
+ * the multi-platform app name. Only relevant for PACKAGED builds — in dev the
+ * writable data lives in the repo's data/ tree via CHAOXING_DATA_DIR, not
+ * userData. Must run before anything reads app.getPath('userData').
+ * Best-effort: on failure (locked files, partial rename) we keep going with a
+ * fresh directory rather than blocking startup.
+ */
+function migrateLegacyUserData(): void {
+  try {
+    const newPath = app.getPath('userData')
+    if (path.basename(newPath) !== APP_NAME) return
+    const parent = path.dirname(newPath)
+    const legacyPath = path.join(parent, LEGACY_APP_NAME)
+    if (!fs.existsSync(legacyPath) || fs.existsSync(newPath)) return
+    fs.renameSync(legacyPath, newPath)
+    console.log(`[main] Migrated userData: ${legacyPath} -> ${newPath}`)
+  } catch (err) {
+    console.warn('[main] Legacy userData migration failed (continuing):', err)
+  }
+}
+
 app.setName(APP_NAME)
+migrateLegacyUserData()
 
 app.whenReady().then(() => {
   // Seed the writable workspace before any handler can spawn the backend

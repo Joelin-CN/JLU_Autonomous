@@ -34,8 +34,8 @@ export interface ElectronAPI {
   stopSelected: (jobId: string, accountIds: number[]) => Promise<void>
   getJobStatus: (jobId: string) => Promise<JobStatus>
   scanCourses: (payload: ScanCoursesPayload) => Promise<Course[]>
-  getCourses: (accountId: number) => Promise<Course[]>
-  getAccounts: () => Promise<Account[]>
+  getCourses: (accountId: number, platform?: 'chaoxing' | 'zhihuishu') => Promise<Course[]>
+  getAccounts: (platform?: 'chaoxing' | 'zhihuishu') => Promise<Account[]>
   getAccountStatus: (accountId: number) => Promise<AccountStatus>
   getSettings: () => Promise<Settings>
   setSettings: (partial: Partial<Settings>) => Promise<void>
@@ -48,11 +48,11 @@ export interface ElectronAPI {
   getAiStatus: () => Promise<{ provider: string; label: string; configured: boolean; model: string; keyTail: string }>
   setAiConfig: (payload: { provider?: string; apiKey?: string; model: string }) => Promise<void>
   testAi: (provider?: string) => Promise<{ ok: boolean; reason?: string; models?: number }>
-  addAccount: (payload: { account: string; password: string; website?: string }) => Promise<void>
-  editAccount: (payload: { index: number; password?: string; website?: string }) => Promise<void>
-  removeAccount: (payload: { index: number }) => Promise<void>
+  addAccount: (payload: { account: string; password: string; website?: string; platform?: 'chaoxing' | 'zhihuishu'; accountsFile?: string }) => Promise<void>
+  editAccount: (payload: { index: number; password?: string; website?: string; platform?: 'chaoxing' | 'zhihuishu'; accountsFile?: string }) => Promise<void>
+  removeAccount: (payload: { index: number; platform?: 'chaoxing' | 'zhihuishu'; accountsFile?: string }) => Promise<void>
   openFilePicker: () => Promise<string | null>
-  getAccountsDefaultPath: () => Promise<string>
+  getAccountsDefaultPath: (platform?: 'chaoxing' | 'zhihuishu') => Promise<string>
   onProgress: (cb: (event: PythonProgressEvent) => void) => () => void
   onPhaseChange: (cb: (event: PythonPhaseEvent) => void) => () => void
   onLog: (cb: (event: PythonLogEvent) => void) => () => void
@@ -86,8 +86,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.JOB_STOP_SELECTED, { jobId, accountIds } satisfies JobControlPayload),
   getJobStatus: (jobId: string) => ipcRenderer.invoke(IPC_CHANNELS.JOB_STATUS, jobId),
   scanCourses: (payload: ScanCoursesPayload) => ipcRenderer.invoke(IPC_CHANNELS.COURSES_SCAN, payload),
-  getCourses: (accountId: number) => ipcRenderer.invoke(IPC_CHANNELS.COURSES_LIST, accountId),
-  getAccounts: () => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_LIST),
+  getCourses: (accountId: number, platform?: string) => ipcRenderer.invoke(IPC_CHANNELS.COURSES_LIST, accountId, platform),
+  getAccounts: (platform?: string) => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_LIST, platform ? { platform } : undefined),
   getAccountStatus: (accountId: number) => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_STATUS, accountId),
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET),
   setSettings: (partial: Partial<Settings>) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET, partial),
@@ -104,14 +104,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAiConfig: (payload: { provider?: string; apiKey?: string; model: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.AI_SET, payload),
   testAi: (provider?: string) => ipcRenderer.invoke(IPC_CHANNELS.AI_TEST, provider),
-  addAccount: (payload: { account: string; password: string; website?: string }) =>
+  addAccount: (payload: { account: string; password: string; website?: string; platform?: string; accountsFile?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_ADD, payload),
-  editAccount: (payload: { index: number; password?: string; website?: string }) =>
+  editAccount: (payload: { index: number; password?: string; website?: string; platform?: string; accountsFile?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_EDIT, payload),
-  removeAccount: (payload: { index: number }) =>
+  removeAccount: (payload: { index: number; platform?: string; accountsFile?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_REMOVE, payload),
   openFilePicker: () => ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_FILE),
-  getAccountsDefaultPath: () => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH),
+  getAccountsDefaultPath: (platform?: string) => ipcRenderer.invoke(IPC_CHANNELS.ACCOUNTS_DEFAULT_PATH, platform ? { platform } : undefined),
   onProgress: makeListener<PythonProgressEvent>(IPC_CHANNELS.ON_PROGRESS),
   onPhaseChange: makeListener<PythonPhaseEvent>(IPC_CHANNELS.ON_PHASE_CHANGE),
   onLog: makeListener<PythonLogEvent>(IPC_CHANNELS.ON_LOG),

@@ -629,7 +629,7 @@ const IPC_CHANNELS = {
 | `system:resources` | 实时 RAM/CPU/运行时长（Node `os` 采样，无 Python） |
 | `memory:plan` | 空闲时按当前机器状态计算的并发计划 |
 | `ai:status` / `ai:set` / `ai:test` | AI 配置读取 / 原子写 `doubao.txt` / 方舟连通性测试 |
-| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径；`default-path` 接受 `{ platform? }` 按平台返回 `passwords/<platform>.txt`（main 版 preload 暂未暴露参数，渲染层走默认 chaoxing） |
+| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径（载荷含可选 `platform` / `accountsFile`，按平台路由 `platforms.<platform>.accounts`；`default-path` 接受 `{ platform? }` 按平台返回 `passwords/<platform>.txt`） |
 | `dialog:open-file` | 文件选择器（自定义账号文件） |
 | `on-memory` | 后端 `MEMORY` 事件推送（预算仪表） |
 
@@ -763,19 +763,16 @@ interface CourseSection {
 #### `courses:list`
 
 - **方向**: Renderer → Main
-- **请求**: `accountId: number`
+- **请求**: `accountId: number, platform?: 'chaoxing' | 'zhihuishu'`（可选第二参数，缺省 chaoxing）
 - **返回**: `Course[]`
-- **当前状态**: ✅ 已接真实后端（同上）
+- **当前状态**: ✅ 已接真实后端（同上，按 platform 路由 `platforms.<platform>.courses`）
 
 #### `accounts:list`
 
 - **方向**: Renderer → Main
-- **请求**: 无
+- **请求**: `{ platform?: 'chaoxing' | 'zhihuishu'; accountsFile?: string }`（可选；缺省 chaoxing）
 - **返回**: `Account[]`（Electron 内部类型）
-- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.accounts` 读取当前账号文件。
-  主进程侧 `runAccountsCommand` 已支持 platform 参数（spawn `platforms.<platform>.accounts`、
-  zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE` 默认 `data/passwords/zhihuishu.txt`），但 preload
-  暂未暴露该参数（渲染层固定走 chaoxing 账号文件）——渲染层平台透传见后续前端多平台 PR
+- **当前状态**: ✅ 已接真实后端——`python -m platforms.<platform>.accounts` 读取对应平台账号文件（`passwords/<platform>.txt` 或 `accountsFile` 覆盖；主进程为 zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`，preload 已透传 platform 参数）
 
 ```typescript
 interface Account {
@@ -920,7 +917,9 @@ interface Ticket {
   type: 'captcha' | 'verification' | 'warning' | 'error'
   title: string
   message: string
-  imageBase64?: string        // 验证码截图
+  imageBase64?: string        // 验证码截图 / 扫码登录二维码
+  timeoutSeconds?: number     // 等待上限（秒）——智慧树扫码登录工单自带
+  platform?: Platform         // 主进程转发时按当前任务平台注入（后端 TICKET 事件本身不携带）
   options?: string[]
   resolved: boolean
   resolution?: string
@@ -928,6 +927,11 @@ interface Ticket {
   resolvedAt?: string
 }
 ```
+
+> 渲染层按字段组合判别交互形态（`shared/lib/ipcClient.ts` 的 `classifyTicketKind`）：
+> `imageBase64 + timeoutSeconds` → 扫码型（二维码 + 倒计时，扫码后自动 resolved）；
+> captcha 类型无 `imageBase64` → 提示型（智慧树滑块，纯文字指引）；
+> 其余 → 输入型（超星验证码图片 + 文本输入）。后端后续可发显式 kind 字段消除启发式。
 
 #### `on-completed`
 

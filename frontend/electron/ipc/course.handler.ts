@@ -149,8 +149,8 @@ function runCoursesQuery(accountIndex: number, platform: Platform = 'chaoxing'):
 }
 
 /** Read discovered courses for several accounts and flatten the results. */
-async function runCoursesForAccounts(accountIndices: number[]): Promise<Course[]> {
-  const perAccount = await Promise.all(accountIndices.map((idx) => runCoursesQuery(idx)))
+async function runCoursesForAccounts(accountIndices: number[], platform: Platform = 'chaoxing'): Promise<Course[]> {
+  const perAccount = await Promise.all(accountIndices.map((idx) => runCoursesQuery(idx, platform)))
   return perAccount.flat()
 }
 
@@ -167,15 +167,16 @@ export function registerCourseHandlers(): void {
     if (!payload.accountIds || payload.accountIds.length === 0) {
       throw new Error('At least one accountId is required')
     }
-    return runCoursesForAccounts(payload.accountIds)
+    const platform: Platform = payload.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing'
+    return runCoursesForAccounts(payload.accountIds, platform)
   })
 
   // ---- courses:list ----
-  ipcMain.handle(IPC_CHANNELS.COURSES_LIST, async (_event, accountId: number) => {
+  ipcMain.handle(IPC_CHANNELS.COURSES_LIST, async (_event, accountId: number, platform?: string) => {
     // accountId is the 0-based index (id=index contract); 0 is valid.
     if (accountId == null || Number.isNaN(accountId)) {
       throw new Error('accountId is required')
     }
-    return runCoursesQuery(accountId)
+    return runCoursesQuery(accountId, platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing')
   })
 }

@@ -280,7 +280,7 @@ function stopWholeJob(job: JobStatus): void {
   clearActiveJobIfCurrent(stoppedBridge)
 }
 
-function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
+function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platform): PythonBridge {
   const currentBridge = new PythonBridge()
 
   currentBridge.on('progress', (event) => {
@@ -372,7 +372,11 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
   })
 
   currentBridge.on('ticket', (event) => {
-    sendToRenderer(win, IPC_CHANNELS.ON_TICKET, event)
+    // The NDJSON TICKET event is platform-agnostic; the renderer needs the
+    // platform for badges/filtering, so stamp the running job's platform onto
+    // the forwarded ticket (protocol shape unchanged — additive field).
+    const stamped = { ...event, ticket: { ...event.ticket, platform } }
+    sendToRenderer(win, IPC_CHANNELS.ON_TICKET, stamped)
   })
 
   currentBridge.on('error', (event) => {
@@ -385,7 +389,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     markTerminalLanes(job, 'error', job.progress)
     if (bridge === currentBridge) setJobActive(false)
     if (getCurrentSettings().notifications) {
-      new Notification({ title: '超星助手', body: `任务异常：${event.error}` }).show()
+      new Notification({ title: 'JLU 学习助手', body: `任务异常：${event.error}` }).show()
     }
     sendToRenderer(win, IPC_CHANNELS.ON_ERROR, event)
   })
@@ -410,7 +414,7 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string): PythonBridge {
     job.finishedAt = new Date().toISOString()
     markTerminalLanes(job, 'completed')
     if (getCurrentSettings().notifications) {
-      new Notification({ title: '超星助手', body: '任务已全部完成。' }).show()
+      new Notification({ title: 'JLU 学习助手', body: '任务已全部完成。' }).show()
     }
 
     sendToRenderer(win, IPC_CHANNELS.ON_COMPLETED, event)
@@ -488,6 +492,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     const jobStatus: JobStatus = {
       jobId,
       status: 'running',
+      platform: payload.platform ?? 'chaoxing',
       phase: 'idle',
       phaseIndex: 0,
       progress: 0,
@@ -501,7 +506,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
 
     retainJob(jobId, jobStatus)
     activeJobId = jobId
-    bridge = createBridgeAndBind(win, jobId)
+    bridge = createBridgeAndBind(win, jobId, payload.platform ?? 'chaoxing')
 
     const args: string[] = ['--job-id', jobId, '--accounts', accountIds.join(',')]
     if (mode) {
