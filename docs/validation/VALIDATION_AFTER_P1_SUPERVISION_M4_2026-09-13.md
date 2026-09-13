@@ -27,7 +27,8 @@
 | P1-3 | UI 双确认流程 | ✅ `npm run dev`（mock）→ browser-use DOM 快照 + 两屏截图 → vision.js 审查（首屏超星组 / 次屏智慧树组分别过审）；期间演示工单（验证码/扫码）按设计弹出并关闭 | 会话记录（截图 artifacts） |
 | P1-4 | 监督渲染层状态链路 | ✅ memory.store.supervision 订阅 `onMemorySupervision`；`reset()` 全空闲清状态；ExecutionStudioView 顶部提示条仅 engaged 渲染（mock 不模拟介入，模板路径由 typecheck + 模板编译覆盖） | 源码 + typecheck |
 | P1-5 | M4 能力矩阵翻转 | ✅ zhihuishu `solveOnly: true`、无置灰 hint；「仅刷题」按钮开放；platforms.test.ts 断言同步（solveOnly===true 且 hint undefined） | `frontend/src/shared/lib/platforms.test.ts` |
-| P1-6 | 真机验证（grade-only，授权「填答不提交」） | ⚠️ **止步登录**：storageState 过期（57 Cookie 恢复后校验失败）→ QR 工单 180s 无人扫码超时 → 密码兜底登录表单填写失败 → `ERROR: 1 account(s) failed: account 0 (login failed)` 干净收尾（5min 自动 STOP 未触发即结束）。**已验证**：solve_only 模式分发正确、登录降级链按设计工作、单节异常隔离（AI 密钥缺失路径）。**未触及**：章测 DOM 抽取/填答（需登录后）。**补验条件**：现场扫码 + `doubao.txt` 真实密钥（本机缺失，deepseek.txt 为占位）；复跑命令见 roadmap §7 M4 备注 | 运行日志 `call_9bdb9bea1a0f464795548501-stdout.log` |
+| P1-6 | M4 真机验证（grade-only，授权「填答不提交」） | ✅ **全链路通过（第 11 轮，2026-09-13 晚，用户现场扫码）**：绪论单元测试 **10/10 题**——DOM 读题型/选项 → 截图加密题干 → DeepSeek 视觉作答 → 内容映射字母（判断/单选/多选全覆盖）→ 真实点击 → 下一题逐题保存草稿 → **未提交未暂存**（草稿留页面待人工接管提交）；其余 5 个章测入口因视频未完成打不开试卷，按设计跳过；整单 `success:true`（337s）。证据：`data/logs/m4v11.log` 逐题日志 + `data/temp/zhs_quiz_q1-10.png` | 运行日志 + 截图 |
+| P1-6a | 真机 8–11 轮过程修复（每处均有轮次教训） | ✅ ①AI 入参结构错位（`{index,text}` vs `{index,question,options}`，题干进不了 prompt）+ DeepSeek 密钥迁移；②RunConfig 生产构造不传 mode → 答题分支永不执行；③章测点击绑在内层 `.name` 且需先清「课程提醒」弹窗；④试卷在**新标签页** stuExamWeb 打开——试卷操作改在 exam page 对象上执行；⑤题干**加密渲染**（DOM 空文本、屏幕可见）→ 截图→AI 视觉路线；⑥末题「下一题」禁用时 `text=` 命中提示文案死循环 → getByRole('button') + 屏幕题号防循环守卫；⑦选项字母 `/^A\./` 锚定被空白失配 → `.mr10` span 精确过滤 | 提交 34d43385 / 944de7c0 / e4f82e59 |
 | P1-7 | 滑块专项结论落档 | ✅ 分析报告 + roadmap D3 同步（维持 hint 工单；后备专项触发条件成文） | `docs/reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md` |
 | P1-8 | 文档同步义务 | ✅ api.md v1.7（MEMORY 小节 / on-memory-supervision / 智慧树 solve_only 语义 / --grade-only/--dry-run）；architecture.md 监督+仪表+M4 三节；roadmap v0.3；CHANGELOG 2026-09-13（续二）；本清单 | docs/ |
 
@@ -37,5 +38,5 @@
 |---|----|------|
 | P2-1 | 真机内存监督越线触发 | **难以安全构造**（需真实把系统内存压到红线附近）——决策逻辑由 11 例单测覆盖；服务链路（定时器/测量/通知/推送）为薄 IO 层，留待真实高负载场景自然观察。冷却 60s / 只暂停不自动恢复 / 手动继续清标记均已单测锁定 |
 | P2-2 | CIM 采样在有 Chrome 运行时的实测收益 | 粗筛快路径收益确定（无 chrome 场景彻底跳过 CIM）；有 chrome 时属性投影为尽力优化，实际收益依赖机器 WMI 状态——留待日常运行观察 MEMORY 事件密度 |
-| P2-3 | M4 章测 DOM 选择器 | `.examPaper_subject` 族选择器来自 M0 Track A 调研（未本地实测），真机补验（P1-6 条件满足后）为最终确认；抽取不足时截图兜底策略已备 |
+| P2-3 | M4 章测 DOM 选择器 | ✅ **已真机确认**（P1-6）：`.examPaper_subject` 族选择器有效（10 题块/题干类型/选项全命中）；题干为加密渲染（DOM 空文本）——文本路线不可用，截图→AI 视觉为标准路线（非兜底）；选项顺序每卷随机的映射已由 `map_answer_to_letters` 处理 |
 | P2-4 | mock 监督介入模拟 | 未做（监督是主进程对真实进程的行为）；如需 dev 演示可后续在 mockClient 加合成 supervision 事件 |

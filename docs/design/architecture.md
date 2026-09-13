@@ -565,14 +565,21 @@ chaoxing_cli.bat full-auto --all-accounts --headed
 
 ## 智慧树 M4 答题求解（2026-09-13）
 
-- **solver** `platforms/zhihuishu/solvers/quiz.py`（架构对齐超星 quiz solver 的
-  瘦身版，单文件双策略）：章树真实点击 `li.chapter-test` → 只读 JS 抽取题面
-  （`.examPaper_subject` / `.subject_describe` / `.examquestions-answer .subject_node`
-  抽取与点击同链保证 nth 索引一致）→ `core.ai.router` 文本作答（题干空走整页截图
-  兜底 `ai_solve_quiz_image`）→ 按字母/判断映射真实点击填答（fill 经快照 textbox
-  ref、essay 留空）→ 快照文本定位提交 + 确认 + 得分解析。安全档位对齐超星：
-  `dry_run` 纯跳过、`grade_only` 填答不提交、真实提交间 60–120s 随机节奏、每节
-  `check_signals()` 让位、单节异常隔离（AI 密钥缺失等只计失败不炸账号运行）。
+- **solver** `platforms/zhihuishu/solvers/quiz.py`（架构对齐超星 quiz solver，
+  2026-09-13 真机 11 轮迭代定型）：清「课程提醒」弹窗 → 真实点击章测入口内层
+  `.name`（点 li 本体不触发）→ 试卷在**新标签页** stuExamWeb 打开（`#/webExamList/
+  dohomework/...`），全部试卷操作经 JS runner 在 exam page 对象上执行（bringToFront
+  定位最新一页）→ **单题展示逐题走**：DOM 读题型/选项（`.examPaper_subject`/
+  `.subject_type_describe`/`.nodeLab` 字母 span+隐藏 radio，文本明文）→ **题干为
+  加密渲染**（`.subject_describe` DOM 空文本、屏幕可见）→ 每题截图走
+  `core.ai.router#ai_solve_quiz_image` 视觉作答 → `map_answer_to_letters` 按选项
+  内容映射（判断题「对/错」文本匹配，选项顺序每卷随机）→ `.mr10` 字母 span 精确
+  过滤点所在 `.label`（真实事件）→ getByRole('button') 点「下一题」逐题存草稿；
+  **末题防循环守卫**（按钮禁用时 text= 会命中提示文案——屏幕题号不前进即收卷）。
+  提交走「提交作业」+确认；安全档位对齐超星：`dry_run` 纯跳过、`grade_only`
+  填答不提交不暂存、真实提交间 60–120s 随机节奏、每节 `check_signals()` 让位、
+  单节异常隔离、finally 统一关试卷页防陈旧标签。真机验证：绪论单元测试
+  10/10 题全链路（见验证清单 P1-6）。
 - **弹题三层链路**（`video.py`）：试选揭示法（406653 技巧，确定性，第一优先）→
   揭示失败走 AI 路由（判断型映射 A/B）→ 再失败关闭弹题发 hint 工单，不卡视频流。
 - **接线**（`api.py`）：`VALID_PHASES` 补 `solve_quiz`；`solve_only` 语义修正为仅

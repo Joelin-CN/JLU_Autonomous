@@ -2,6 +2,13 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-13（续三）— M4 真机全链路验证通过：DeepSeek 迁移 + 试卷页层按真机 DOM 重构
+
+- **DeepSeek 迁移**：真实密钥自老项目迁入 `data/passwords/deepseek.txt`（git 忽略），移除 doubao.txt，`chaoxing_config.json`（git 忽略真实配置）`ai.provider` 切 `deepseek-api`；文本冒烟 2/2 全对。
+- **M4 真机验证（grade-only 填答不提交，用户现场扫码）**：绪论单元测试 **10/10 题**全链路——登录态复用 → 章测入口 → 试卷新标签页 → 逐题「DOM 读题型/选项 + 截图加密题干 → DeepSeek 视觉作答 → 内容映射字母 → 真实点击 → 下一题存草稿」→ **未提交未暂存**；判断/单选/多选全覆盖（多选 BD/CD 两连正确）；其余 5 章测入口因视频未完成按设计跳过；整单 success。证据：`data/logs/m4v11.log` + `data/temp/zhs_quiz_q1-10.png`。
+- **真机驱动的修复（8–11 轮迭代）**：AI 入参结构对齐 `{index,question,options}`（34d43385）；RunConfig 生产构造不传 mode 致答题分支永不执行→双向自洽（944de7c0）；章测点击 `.name` 内层元素 + 前置清「课程提醒」；试卷在**新标签页** stuExamWeb——试卷操作全部改在 exam page 对象上执行；**题干加密渲染**（DOM 空文本/屏幕可见）→ 截图→AI 视觉为标准路线；末题「下一题」禁用时 `text=` 命中提示文案死循环 → getByRole('button') + 屏幕题号防循环守卫；选项字母锚定正则被空白失配 → `.mr10` span 精确过滤；试卷操作非法输出带出真实原因（e4f82e59）。
+- **回归**：pytest `tests/unit` **626 passed** + `tests/platforms` **37 passed**（M4 +3：map_answer_to_letters / judge_answer_text 语义化）；前端 typecheck 0 错误 + vitest **63 passed**。文档：验证清单 P1-6/P1-6a/P2-3 更新、roadmap M4 状态翻转。
+
 ## 2026-09-13（续二）— P1 增量收尾 + 智慧树 M4 答题落地：内存监督 / 预算仪表 / CIM 采样提速 / CI 触发 / M4 solver / 滑块专项
 
 - **CI 触发修复（.github/workflows/ci.yml）**：`pull_request` 补 `types: [opened, synchronize, reopened, edited]`——默认 types 不含 edited，PR 改基分支后 required checks 不重跑（上一会话被迫空提交触发）。workflow 改动在本 PR 自身不生效（GitHub 限制），合入 main 后生效。
