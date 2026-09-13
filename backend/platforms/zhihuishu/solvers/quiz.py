@@ -329,7 +329,13 @@ class ZhihuishuQuizSolver:
             check_signals()
             log(f"[ZHS-Quiz] ({i}/{len(sections)}) {sec['name']}")
             self.stats["sections"] += 1
-            if self._solve_section(sec["name"]):
+            try:
+                ok = self._solve_section(sec["name"])
+            except Exception as e:
+                # 单节失败（如 AI 密钥缺失/网络异常）只计失败，不炸整个账号运行
+                log(f"「{sec['name']}」求解异常：{e}", "ERROR")
+                ok = False
+            if ok:
                 self.stats["solved"] += 1
             else:
                 self.stats["failed"] += 1
