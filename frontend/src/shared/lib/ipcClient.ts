@@ -18,6 +18,7 @@ import type {
   TicketKind,
   MemoryEvent,
   MemoryPlan,
+  MemorySupervisionEvent,
   AiStatus,
   AiTestResult,
 } from './types'
@@ -541,6 +542,12 @@ export class ElectronApiClient implements AppApi {
 
   onMemory(cb: (e: MemoryEvent) => void): () => void {
     const cleanup = requireAPI().onMemory((event: any) => cb(event))
+    this.cleanupFns.push(cleanup)
+    return cleanup
+  }
+
+  onMemorySupervision(cb: (e: MemorySupervisionEvent) => void): () => void {
+    const cleanup = requireAPI().onMemorySupervision((event: any) => cb(event))
     this.cleanupFns.push(cleanup)
     return cleanup
   }

@@ -110,6 +110,23 @@ export interface PythonMemoryEvent {
 
 export type MemoryEvent = PythonMemoryEvent
 
+/**
+ * 主进程内存监督（策略 C）推送到渲染层的状态事件。
+ * 只在介入（engaged）时推送；armed（监督开启未触发）不推送，避免噪音。
+ */
+export interface MemorySupervisionEvent {
+  type: 'MEMORY_SUPERVISION'
+  state: 'armed' | 'engaged'
+  systemUsedGB: number
+  /** 介入阈值 = systemLimitGB − margin（默认 1GB）。 */
+  thresholdGB: number
+  systemLimitGB: number
+  /** 被监督暂停的平台（engaged 时必有）。 */
+  platform?: Platform
+  at: string
+  message: string
+}
+
 export interface StartJobPayload {
   /** 目标平台（默认超星）。决定后端入口 platforms.<platform>.api 与凭据文件。 */
   platform?: Platform
@@ -366,5 +383,6 @@ export const IPC_CHANNELS = {
   ON_ERROR: 'on-error',
   ON_RESULT: 'on-result',
   ON_MEMORY: 'on-memory',
+  ON_MEMORY_SUPERVISION: 'on-memory-supervision',
   SYSTEM_VALIDATE_PYTHON: 'system:validate-python',
 } as const

@@ -125,6 +125,20 @@ export interface MemoryEvent {
   message: string
 }
 
+/** 主进程内存监督（策略 C）状态事件：仅在介入（engaged）时推送。 */
+export interface MemorySupervisionEvent {
+  type: 'MEMORY_SUPERVISION'
+  state: 'armed' | 'engaged'
+  systemUsedGB: number
+  /** 介入阈值 = systemLimitGB − margin（默认 1GB）。 */
+  thresholdGB: number
+  systemLimitGB: number
+  /** 被监督暂停的平台（engaged 时必有）。 */
+  platform?: Platform
+  at: string
+  message: string
+}
+
 export interface AiStatus {
   provider: string
   label: string
@@ -350,6 +364,8 @@ export interface AppApi {
   onError(cb: (e: ErrorEvent) => void): () => void
   onResult?(cb: (data: unknown) => void): () => void
   onMemory(cb: (e: MemoryEvent) => void): () => void
+  /** 主进程内存监督介入事件（Electron 真实；Mock 不模拟）。 */
+  onMemorySupervision(cb: (e: MemorySupervisionEvent) => void): () => void
   getAiStatus(): Promise<AiStatus>
   setAiConfig(payload: { provider?: string; apiKey?: string; model: string }): Promise<void>
   testAi(provider?: string): Promise<AiTestResult>

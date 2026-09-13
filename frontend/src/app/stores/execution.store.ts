@@ -576,7 +576,7 @@ export const useExecutionStore = defineStore('execution', () => {
     }
     if (!PLATFORMS.some((p) => slots[p].status !== 'idle')) {
       useMemoryStore().stop()
-      useMemoryStore().setPlan(null)
+      useMemoryStore().reset()
     }
   }
 

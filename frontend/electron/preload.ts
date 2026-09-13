@@ -21,6 +21,7 @@ import type {
   SystemResources,
   PythonMemoryEvent,
   MemoryPlan,
+  MemorySupervisionEvent,
 } from './types'
 import { IPC_CHANNELS } from './types'
 
@@ -61,6 +62,7 @@ export interface ElectronAPI {
   onError: (cb: (event: PythonErrorEvent) => void) => () => void
   onResult: (cb: (event: PythonResultEvent) => void) => () => void
   onMemory: (cb: (event: PythonMemoryEvent) => void) => () => void
+  onMemorySupervision: (cb: (event: MemorySupervisionEvent) => void) => () => void
   removeAllListeners: (channel: string) => void
   validatePython: (pythonPath: string) => Promise<{ reason: string | null }>
 }
@@ -120,6 +122,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onError: makeListener<PythonErrorEvent>(IPC_CHANNELS.ON_ERROR),
   onResult: makeListener<PythonResultEvent>(IPC_CHANNELS.ON_RESULT),
   onMemory: makeListener<PythonMemoryEvent>(IPC_CHANNELS.ON_MEMORY),
+  onMemorySupervision: makeListener<MemorySupervisionEvent>(IPC_CHANNELS.ON_MEMORY_SUPERVISION),
   removeAllListeners: (channel: string) => ipcRenderer.removeAllListeners(channel),
   validatePython: (pythonPath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_VALIDATE_PYTHON, pythonPath),

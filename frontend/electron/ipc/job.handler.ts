@@ -12,6 +12,7 @@ import {
   measureProjectChromeGB,
   measureSystemUsedGB,
 } from '../memory/planner'
+import { memorySupervisor } from '../memory/supervisor'
 import type { Platform,
   JobControlPayload,
   JobLaneStatus,
@@ -244,6 +245,8 @@ function resumeWholeJob(job: JobStatus): void {
   }
 
   slot.bridge.resume()
+  // 用户手动恢复：清除内存监督对该平台的介入标记（再越线时允许重新介入）。
+  memorySupervisor.markResumed(slot.platform)
   job.status = 'running'
   job.phase = 'idle'
   job.message = 'Job resumed.'
@@ -336,7 +339,9 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
   })
 
   currentBridge.on('memory', (event) => {
-    // MEMORY 是进程级快照（不带平台）——渲染层按平台分桶显示，转发时统一盖章。
+    // MEMORY 是进程级快照（不带平台）——渲染层按平台分桶显示，转发时统一盖章；
+    // 同时喂给内存监督器（策略 C），作为各平台项目占用的最新观测。
+    memorySupervisor.noteUsage(platform, event.projectChromeGB)
     sendToRenderer(win, IPC_CHANNELS.ON_MEMORY, { ...event, platform })
   })
 
@@ -457,6 +462,19 @@ function createBridgeAndBind(win: BrowserWindow, jobId: string, platform: Platfo
 }
 
 export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): void {
+  // 内存监督（策略 C）钩子：介入时按平台找到槽位执行整任务暂停
+  // （bridge.pause + JobStatus 状态同步），与用户手动暂停同一条路径。
+  memorySupervisor.bindHooks({
+    getMainWindow,
+    pauseSlot: (platform) => {
+      const slot = jobSlots.occupant(platform)
+      if (!slot) return
+      const job = jobs.get(slot.jobId)
+      if (job) pauseWholeJob(job)
+      else if (slot.bridge.isRunning()) slot.bridge.pause()
+    },
+  })
+
   ipcMain.handle(IPC_CHANNELS.JOB_START, async (_event, payload: StartJobPayload) => {
     checkRateLimit('job:start')
 
@@ -520,6 +538,8 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
     retainJob(jobId, jobStatus)
     const jobBridge = createBridgeAndBind(win, jobId, platform)
     jobSlots.acquire(platform, jobId, jobBridge, plan.budgetGB)
+    // 内存监督（策略 C）启表：systemLimitGB 为双平台共享的全机红线。
+    memorySupervisor.start(plan.systemLimitGB)
 
     const args: string[] = ['--job-id', jobId, '--accounts', accountIds.join(',')]
     if (mode) {
@@ -658,6 +678,7 @@ export function registerJobHandlers(getMainWindow: () => BrowserWindow | null): 
  * 双平台并行时逐一停止所有槽位；每个槽位沿用原有的 STOP → 定时升级强杀链路。
  */
 export function stopAllJobs(): void {
+  memorySupervisor.stop()
   for (const slot of jobSlots.activeSlots()) {
     stopSlotDuringQuit(slot)
   }

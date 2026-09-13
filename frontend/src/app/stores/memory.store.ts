@@ -1,22 +1,25 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import type { MemoryEvent, MemoryPlan, Platform } from '@/shared/lib/types'
+import type { MemoryEvent, MemoryPlan, MemorySupervisionEvent, Platform } from '@/shared/lib/types'
 import { createApiClient } from '@/shared/lib/apiClient'
 import { useLogStore } from '@/app/stores/log.store'
 
 /**
  * 内存事件/计划 —— 按平台分桶。双平台并行时两路 MEMORY 事件（主进程已按槽位
  * 盖 platform 章）各入各桶；单仪表视图（设置/仪表盘）读兼容 getter `latest`
- * 与 `plan`（最近一路 / 全局计划）。
+ * 与 `plan`（最近一路 / 全局计划）。附带主进程内存监督（策略 C）的介入状态。
  */
 export const useMemoryStore = defineStore('memory', () => {
   const latestByPlatform = ref<Partial<Record<Platform, MemoryEvent>>>({})
   const planByPlatform = ref<Partial<Record<Platform, MemoryPlan>>>({})
   /** memory:plan IPC 的全局口径（无任务时的仪表兜底）。 */
   const globalPlan = ref<MemoryPlan | null>(null)
+  /** 主进程内存监督最近一次介入（engaged）；null = 未介入。 */
+  const supervision = ref<MemorySupervisionEvent | null>(null)
   const running = ref(false)
   const api = createApiClient()
   let cleanup: (() => void) | null = null
+  let supervisionCleanup: (() => void) | null = null
   let planFailLogged = false
   let lastPlatform: Platform | null = null
 
@@ -45,12 +48,21 @@ export const useMemoryStore = defineStore('memory', () => {
         lastPlatform = p
       }
     })
+    supervisionCleanup = api.onMemorySupervision((e) => {
+      supervision.value = e
+    })
   }
 
   function stop(): void {
     // 只降标志、不注销订阅：双平台并行时另一平台的 MEMORY 事件仍需送达
     // （一个任务结束不应掐掉另一路的仪表）。
     running.value = false
+  }
+
+  /** 全空闲/复位：清空监督介入状态与任务份额计划。 */
+  function reset(): void {
+    supervision.value = null
+    planByPlatform.value = {}
   }
 
   /** 写某平台的任务份额计划；platform=null 时清空全部任务份额。 */
@@ -78,6 +90,7 @@ export const useMemoryStore = defineStore('memory', () => {
     latestByPlatform,
     planByPlatform,
     globalPlan,
+    supervision,
     latest,
     plan,
     running,
@@ -85,6 +98,7 @@ export const useMemoryStore = defineStore('memory', () => {
     planFor,
     start,
     stop,
+    reset,
     setPlan,
     refreshPlan,
   }

@@ -634,6 +634,11 @@ export class MockApiClient implements AppApi {
     return () => {}
   }
 
+  onMemorySupervision(_callback: (e: import('./types').MemorySupervisionEvent) => void): () => void {
+    // Mock 模式不模拟内存监督介入——监督是主进程对真实 Python 进程的行为。
+    return () => {}
+  }
+
   removeAllListeners(): void {
     this.dispose()
   }
