@@ -2,6 +2,12 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-13（续四）— M4 用户复核收口：多选确定钮 / 选中态双信号 / 末题暂存 / 扫码即导出
+
+- **触发**：用户复核绪论测试草稿发现「部分题未勾选」。DOM 只读巡检 + vision 截图交叉定位三个真缺陷：多选（checkbox）选项点击后不点题块内「确定」就翻页，选择整卷丢弃（两道多选草稿全空而单选/判断正常）；末题无「下一题」致答案不保存；**选中校验读 input.checked 是错信号**——新点击只改 Vue 组件态（换 img 图标渲染选中），原生 radio 不同步（vision 实证：视觉已选中而 checked=false）。
+- **修复**（115e4e05 / 18bd0ea6）：多选点完字母点题块内「确定」；`read_selections` 双信号（input.checked OR 题内图标少数派）+ 读失败 None/空表区分（防守护进程抖动假阴性误补点）；末题收尾点「暂存作业」（定位器 getByRole→.btn 族回退 + 重试，只存草稿不交卷，仍属「填答不提交」）；`_solve_section` 状态串计账修双计。另修扫码成功跳转后校验竞态：立即导出 storageState（校验失败不浪费扫码）+ 校验重试（c9dda3d8）。
+- **终态（DOM+vision 双确认）**：绪论单元测试草稿 **10/10 题已答、完成率 100%、未提交**——含两道多选与末题；等用户人工核对后接管提交。门禁：pytest `tests/platforms` 37 passed（unit 626 不受影响）。
+
 ## 2026-09-13（续三）— M4 真机全链路验证通过：DeepSeek 迁移 + 试卷页层按真机 DOM 重构
 
 - **DeepSeek 迁移**：真实密钥自老项目迁入 `data/passwords/deepseek.txt`（git 忽略），移除 doubao.txt，`chaoxing_config.json`（git 忽略真实配置）`ai.provider` 切 `deepseek-api`；文本冒烟 2/2 全对。
