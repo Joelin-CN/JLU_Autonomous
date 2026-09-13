@@ -279,3 +279,19 @@ class TestFilterCourses:
     def test_no_match_empty(self):
         from platforms.zhihuishu.api import filter_courses
         assert filter_courses([{"name": "x", "recruitId": "r", "courseId": "c"}], "zzz") == []
+
+
+class TestCoursesMapping:
+    def test_course_id_and_progress(self):
+        from platforms.zhihuishu.courses import _map_course, _parse_progress
+        c = _map_course({"courseId": "1000003834", "recruitId": "428215",
+                         "name": "数字集成电路", "progress": "2%",
+                         "total_sections": 3, "remaining_sections": [],
+                         "quiz_sections": []}, 0)
+        assert c["id"] == "1000003834"          # 渲染层不再拿 undefined
+        assert c["progress"] == 2                # "2%" → 2（NaN% 修复）
+        assert _parse_progress(None) == 0
+        assert _parse_progress("37%") == 37
+        # id 兜底链
+        assert _map_course({"recruitId": "r", "name": "n"}, 0)["id"] == "r"
+        assert _map_course({"name": "n"}, 0)["id"] == "n"
