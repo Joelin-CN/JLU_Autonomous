@@ -74,6 +74,7 @@ class TestParseScore:
 
 class TestBuildAiQuestions:
     def test_format(self):
+        """format_quiz_text_prompt 消费 {index, question, options} 结构。"""
         questions = [
             {"type": "single", "stem": "1+1=?",
              "options": ["1", "2", "3", "4"]},
@@ -81,9 +82,14 @@ class TestBuildAiQuestions:
         ]
         out = build_ai_questions(questions)
         assert out[0]["index"] == 1
-        assert out[0]["text"].startswith("【single】1+1=?")
-        assert "A. 1" in out[0]["text"] and "D. 4" in out[0]["text"]
-        assert out[1]["text"].startswith("【judge】天是蓝的")
+        assert out[0]["question"].startswith("【single】1+1=?")
+        assert out[0]["options"][0] == "A. 1"
+        assert out[0]["options"][3] == "D. 4"
+        assert out[1]["question"].startswith("【judge】天是蓝的")
+        # 直接喂给 format_quiz_text_prompt 应产出含题干与选项的 prompt
+        from core.ai.prompts import format_quiz_text_prompt
+        prompt = format_quiz_text_prompt(out, "测试课", "冒烟")
+        assert "1+1=?" in prompt and "A. 1" in prompt
 
 
 class TestParseRevealLetters:

@@ -322,14 +322,17 @@ async (page) => {
         return []
 
     from platforms.zhihuishu.solvers.quiz import (
-        detect_question_type, parse_answer_letters,
+        build_ai_questions, detect_question_type, parse_answer_letters,
     )
     qtype = detect_question_type(st.get("typeText", ""), len(st["options"]))
-    text = (f"【{qtype}】{st.get('title', '')}\n"
-            + "\n".join(f"{chr(65 + j)}. {o}" for j, o in enumerate(st["options"])))
+    questions = build_ai_questions([{
+        "type": qtype,
+        "stem": st.get("title", ""),
+        "options": st["options"],
+    }])
     try:
         from core.ai.router import ai_solve_quiz
-        answers = ai_solve_quiz([{"index": 1, "text": text}], "", "弹题")
+        answers = ai_solve_quiz(questions, "", "弹题")
     except Exception as e:
         log(f"弹题 AI 作答失败：{e}", "WARN")
         return []

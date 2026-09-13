@@ -110,13 +110,21 @@ def parse_score(text: str):
 
 
 def build_ai_questions(questions: list) -> list:
-    """把抽取的题块组装为 AI 路由入参 [{index, text}]（题型标注 + 选项枚举）。"""
+    """把抽取的题块组装为 AI 路由入参。
+
+    ``core.ai.prompts.format_quiz_text_prompt`` 消费 ``{index, question,
+    options}`` 结构（question 为题干、options 为已带字母前缀的选项行）——
+    不是整段 text，否则题干进不了 prompt（DeepSeek 实测返回空数组）。
+    """
     out = []
     for i, q in enumerate(questions, 1):
-        lines = [f"【{q.get('type', 'single')}】{q.get('stem', '').strip()}"]
-        for j, opt in enumerate(q.get("options", [])):
-            lines.append(f"{chr(65 + j)}. {opt}")
-        out.append({"index": i, "text": "\n".join(lines)})
+        options = [f"{chr(65 + j)}. {opt}"
+                   for j, opt in enumerate(q.get("options", []))]
+        out.append({
+            "index": i,
+            "question": f"【{q.get('type', 'single')}】{q.get('stem', '').strip()}",
+            "options": options,
+        })
     return out
 
 
