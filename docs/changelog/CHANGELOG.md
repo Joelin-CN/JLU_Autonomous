@@ -2,6 +2,14 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-09-13（续）— 真机联测观察项清偿：监视线程兜底 / 工单倒计时 NaN / mock 工单 accountId / 空闲态测量回退
+
+- **MemoryMonitor 线程兜底（core/memory.py）**：`run()` 采样异常从只捕 `MemorySamplerError` 改为捕获 `Exception` 统一降级（跳过本轮 + WARN）——真机多 Chrome 进程时 CIM 查询可超 20s 抛 `subprocess.TimeoutExpired`（不属 `MemorySamplerError`），原实现监视线程直接死亡、后续 MEMORY 事件与急停判定全部失效；gate 的采样自带 fail-open 不受影响。新增 `test_monitor_thread_survives_sampler_exception`（首轮抛 TimeoutExpired → 线程存活并继续发事件）。
+- **扫码工单倒计时 NaN:NaN（双端修复）**：智慧树扫码/滑块工单此前不带 `createdAt`（超星由 content handlers 盖章，智慧树漏了）→ 渲染层 `new Date(undefined).getTime()`=NaN。智慧树 `_screenshot_ticket` 补 ISO-毫秒-UTC 盖章；渲染层 `mapElectronTicket` 新增 `_parseEpochMs` 兜底（createdAt 解析失败回落当前时刻，resolvedAt 同修）。
+- **mock 演示工单 accountId 数字化**：mock 账号 id 为 `acct_*` 字符串，演示验证码工单透传导致 `parseAccountId` 报错文字压按钮——改为可解析数字（非数字回落 `0`），并行测试补 `Number.isInteger` 断言。
+- **electron 空闲态测量回退（memory/planner.ts）**：`measureProjectChromeGB` 的 PS 脚本无 `$null→0` 守卫（后端同款脚本有），无项目 Chrome 时输出空串被当探针失败 → job:start 基线测量整块回退 os 估计。补守卫后空闲态走真实系统测量。
+- **回归**：pytest **621 passed**（+1 监视线程存活）；前端 typecheck 0 错误 + vitest **50 passed**（演示工单断言增强）。
+
 ## 2026-09-13 — 真机双 Python 进程联测（占位账号）：分账/闸门/并行全验证 + 三处当场修复
 
 - **联测结论（T1/T2/T3 三层，真实账号零学习操作）**：①生产 `allocateBudget`+真实测量断言分账不变式；②直接双进程探针（预算 0.3GB<0.7 单实例）验证**闸门永不放行、零浏览器打开**、双路 MEMORY 事件、STOP 干净退出；③Electron 全链路（computer-use 驱动真实窗口，占位账号经 `ZHIHUISHU_ACCOUNTS_FILE` 重定向）：智慧树先启独跑 `--budget-gb 9.83`，超星后启**并行放行**拿最低保障 `--budget-gb 0.70 --max-concurrent 1`（动态剩余分账），且超星闸门被智慧树的全局占用挡住——智慧树停止后**立即放行**开浏览器（闸门动态跟随）；双 banner 并存，分组停止后 python 进程清退。

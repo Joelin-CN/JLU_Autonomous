@@ -30,9 +30,10 @@
 
 ## P2（观察项，不阻塞）
 
-- mock 演示验证码的 `accountId` 为字符串 id（`acct_*`），`parseAccountId` 报错文字压在弹层按钮边框上——**存量演示模式特有**（真实后端工单带数字 accountId），与本次改造无关，建议后续给 mock 演示工单用数字 accountId。
+- ~~mock 演示验证码的 `accountId` 为字符串 id（`acct_*`），`parseAccountId` 报错文字压在弹层按钮边框上~~——**2026-09-13 已修**：演示工单 accountId 改为可解析数字（mock 账号 id 非 数字时回落 `0`），mockClient 并行测试补断言。
 - fullPage 截图中固定侧栏与长页面产生常见伪影（视口截图无此问题）；不影响真实渲染。
 - MEMORY 事件 mock 模式仍不发射（沿用现状）；执行页按平台分显预算仪表留作后续增量。
+- electron 侧 `measureProjectChromeGB` 空 Chrome 时 PS 输出空串曾致测量整块回退 os 估计——**2026-09-13 已修**（PS 脚本补 `$null→0` 守卫，与后端同款脚本对齐）；空闲态基线测量现走真实系统测量路径。
 
 ## P0 补充 — 真机双 Python 进程联测（2026-09-13，占位账号、真实账号零学习操作）
 
@@ -52,7 +53,7 @@
 - **T2 双进程闸门探针（零浏览器）**：直接 spawn `platforms.{chaoxing,zhihuishu}.api`，预算 0.3GB + system-limit 200 → 22s 双进程并行存活、各 3×MEMORY、各 4 次闸门等待、STOP 后 exit 0。
 - **T3 Electron 全链路（computer-use 驱动真实窗口）**：占位账号经 `ZHIHUISHU_ACCOUNTS_FILE` 重定向；超星 3 账号 / 智慧树 1 账号真实启动；执行页双 banner 并存、侧栏双平台 running；超星后启拿 0.70GB 份额且**闸门挡住其开浏览器**（智慧树占用全局额度）→ 智慧树停止后超星闸门放行开始登录；分组「全部停止」后 python.exe 清退 count=0。
 - **联测发现并当场修复**：① 智慧树 argparse 丢 `--job-id/--accounts`（首轮 T2 暴露：此前补内存参数的编辑误删，pytest/mock 均不可见——已修复并新增 `test_cli_argparse_smoke.py` 2 例防回归，pytest 620 passed）；② 智慧树协议处理器缺 MEMORY 分支（monitor 事件被静默丢弃——已补）；③ accounts:list 空参数（已显式传 `list`）。
-- **联测新观察项（未修，记档）**：① `core/memory.py` MemoryMonitor 线程无异常兜底——真机多 Chrome 进程时 PowerShell CIM 采样可超 20s 超时 → 监视线程死亡（gate 的采样自带 fail-open 不受影响；建议后续 monitor 循环加 try/except + 降级）；② 扫码工单倒计时显示 `NaN:NaN`（工单 timeoutSeconds 缺省路径）；③ 智慧树占位账号 index-0 与真实账号共用 profile 目录——首轮联测曾恢复旧登录态 Cookie（仅登录态验证、未做任何学习操作即停止），后续占位联测应先移开 `storage-state.json`（本轮已移开并测完还原）。
+- **联测新观察项**：~~① `core/memory.py` MemoryMonitor 线程无异常兜底~~（**2026-09-13 已修**：采样异常统一降级跳过本轮，`TimeoutExpired` 不再杀线程，新增 `test_monitor_thread_survives_sampler_exception`）；~~② 扫码工单倒计时显示 `NaN:NaN`~~（**2026-09-13 已修**：智慧树工单补 `createdAt` ISO 盖章 + 渲染层 `mapElectronTicket` 解析失败回落当前时刻）；③ 智慧树占位账号 index-0 与真实账号共用 profile 目录——占位联测应先移开 `storage-state.json`（运维注意事项，长期成立；首轮联测曾恢复旧登录态 Cookie，仅登录态验证、未做任何学习操作即停止，本轮已移开并测完还原）。
 
 ## 复现演示流（dev mock）
 
