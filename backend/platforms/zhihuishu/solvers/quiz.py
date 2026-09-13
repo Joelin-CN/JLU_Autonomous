@@ -294,8 +294,15 @@ def confirm_multi_selection() -> bool:
         return False
 
 
-def read_selections() -> list:
-    """只读回读当前题各选项选中态（input.checked），返回已选字母表。"""
+def read_selections():
+    """只读回读当前题各选项选中态（双信号）。
+
+    - input.checked：草稿恢复态可靠；**新点击不同步**——Vue 组件态用换 img
+      图标渲染选中（视觉真值），原生 radio 不更新（真机 vision 交叉实证：
+      点击后视觉已选中而 checked=false，曾致选中校验假阴性）；
+    - 图标少数派：题内选项 img.src 与众数（未选样式）不同的 = 选中。
+    返回已选字母表；读失败返回 None（与空表区分，防假阴性补点）。
+    """
     try:
         st = _exam_op(
             "  const r = await exam.evaluate(() => {\n"
@@ -305,15 +312,29 @@ def read_selections() -> list:
             "      return cs.display !== 'none' && rect.height > 0;\n"
             "    });\n"
             "    if (!vis) return JSON.stringify({sel: []});\n"
-            "    const sel = [...vis.querySelectorAll('.nodeLab')]\n"
-            "      .filter(n => { const i = n.querySelector('input'); return i && i.checked; })\n"
+            "    const nodes = [...vis.querySelectorAll('.nodeLab')];\n"
+            "    const srcs = nodes.map(n => {\n"
+            "      const img = n.querySelector('img');\n"
+            "      return img ? (img.getAttribute('src') || '') : '';\n"
+            "    });\n"
+            "    const freq = {};\n"
+            "    srcs.forEach(u => { freq[u] = (freq[u] || 0) + 1; });\n"
+            "    const modalSrc = Object.entries(freq)\n"
+            "      .sort((a, b) => b[1] - a[1])[0];\n"
+            "    const modal = modalSrc ? modalSrc[0] : '';\n"
+            "    const sel = nodes\n"
+            "      .filter((n, i) => {\n"
+            "        const input = n.querySelector('input');\n"
+            "        const visual = srcs[i] && modal && srcs[i] !== modal;\n"
+            "        return (input && input.checked) || visual;\n"
+            "      })\n"
             "      .map(n => clean((n.querySelector('span.mr10') || {}).textContent).replace('.', ''));\n"
             "    return JSON.stringify({sel});\n"
             "  });\n"
             "  return r;")
         return st.get("sel", [])
     except Exception:
-        return []
+        return None
 
 
 def save_draft() -> bool:
@@ -321,21 +342,30 @@ def save_draft() -> bool:
 
     站点保存机制是「点选项后点下一题才存」，末题没有下一题——grade-only
     下用暂存收尾（与逐题草稿同语义，非提交）。真实提交模式无需此步。
+    按钮可能非 role=button（.btn 族 div）——getByRole 找不到时回退类名+文本
+    过滤；守护进程抖动窗口会假失败，失败间隔重试一次（真机实证）。
     """
-    try:
-        return _exam_op(
-            "  const btn = exam.getByRole('button', {name: /暂存作业/}).first();\n"
-            "  const n = await btn.count();\n"
-            "  if (!n) return JSON.stringify({ok: false, reason: 'no-btn'});\n"
-            "  await btn.click({timeout: 8000});\n"
-            "  await exam.waitForTimeout(1500);\n"
-            "  const confirm = exam.getByRole('button', {name: /确\\s*定/}).first();\n"
-            "  try { if (await confirm.count()) await confirm.click({timeout: 3000}); } catch (e) {}\n"
-            "  await exam.waitForTimeout(800);\n"
-            "  return JSON.stringify({ok: true});", timeout=30).get("ok", False)
-    except Exception as e:
-        log(f"暂存作业失败：{e}", "WARN")
-        return False
+    for attempt in (1, 2):
+        try:
+            if _exam_op(
+                "  let btn = exam.getByRole('button', {name: /暂存作业/}).first();\n"
+                "  if (!(await btn.count())) {\n"
+                "    btn = exam.locator('.btn, div[class*=btn], a[class*=btn], span[class*=btn]')\n"
+                "      .filter({hasText: /暂存作业/}).first();\n"
+                "  }\n"
+                "  if (!(await btn.count())) return JSON.stringify({ok: false, reason: 'no-btn'});\n"
+                "  await btn.click({timeout: 8000});\n"
+                "  await exam.waitForTimeout(1500);\n"
+                "  const confirm = exam.locator('.btn, div[class*=btn]').filter({hasText: /^确\\s*定$/}).first();\n"
+                "  try { if (await confirm.count()) await confirm.click({timeout: 3000}); } catch (e) {}\n"
+                "  await exam.waitForTimeout(800);\n"
+                "  return JSON.stringify({ok: true});", timeout=30).get("ok", False):
+                return True
+        except Exception as e:
+            log(f"暂存作业失败（第 {attempt} 次）：{e}", "WARN")
+        if attempt == 1:
+            human_delay(3.0, 0.3)
+    return False
 
 
 def click_next_question() -> bool:
@@ -590,6 +620,9 @@ async (page) => {
                     log("多选「确定」已点击")
                 human_delay(0.5, 0.1)
             got = read_selections()
+            if got is None:
+                log("选中回读失败（守护进程抖动），跳过校验按已点击计", "WARN")
+                return True
             if set(picked) <= set(got):
                 return True
             missing = [l for l in picked if l not in got]
