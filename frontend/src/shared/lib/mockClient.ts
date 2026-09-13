@@ -7,6 +7,8 @@ import type {
   Course,
   ErrorEvent,
   JobHandle,
+  MemoryEvent,
+  MemoryPlan,
   PhaseChangeEvent,
   Platform,
   ProgressEvent,
@@ -72,6 +74,10 @@ interface JobSimulation {
 const MAX_TICKETS = 200
 
 const PLATFORMS: Platform[] = ['chaoxing', 'zhihuishu']
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
 
 export class MockApiClient implements AppApi {
   /** 按平台分桶的 mock 状态（与真实 store 的分桶模型一致）。 */
@@ -157,6 +163,45 @@ export class MockApiClient implements AppApi {
     return Math.max(1, Number(payload.options?.maxConcurrency ?? 2))
   }
 
+  /** 仿真口径的全局内存计划（与 mock getMemoryPlan 同一数值）。 */
+  private static MOCK_BASE_PLAN: MemoryPlan = {
+    totalGB: 32, baselineGB: 14, budgetGB: 13.5, cpuCap: 8,
+    memMax: 19, maxConcurrent: 8, systemLimitGB: 28.5, perAccountEstimateGB: 0.7,
+  }
+
+  /** 剩余分账（迷你 allocateBudget）：份额 = clamp(全局预算 − 其他平台已授予, 1 账号, 全局预算)。 */
+  private synthesizeMemoryPlan(platform: Platform): MemoryPlan {
+    const base = MockApiClient.MOCK_BASE_PLAN
+    const granted = [...this.simulations.values()]
+      .filter((s) => s.platform !== platform && s.running)
+      .reduce((sum, s) => sum + (s.handle.memoryPlan?.budgetGB ?? 0), 0)
+    if (granted <= 0) return { ...base }
+    const est = base.perAccountEstimateGB
+    const shareGB = Math.min(Math.max(base.budgetGB - granted, est), base.budgetGB)
+    const memMax = Math.max(1, Math.floor(shareGB / est))
+    return { ...base, budgetGB: shareGB, memMax, maxConcurrent: Math.max(1, Math.min(memMax, base.cpuCap)) }
+  }
+
+  /** 每个仿真 tick 发一条合成 MEMORY：占用随活跃 lane 数增长（封顶预算内），
+   *  字段口径与后端 core.memory.MemoryMonitor 的快照一致。 */
+  private emitMockMemory(simulation: JobSimulation, runningLanes: number): void {
+    const plan = simulation.handle.memoryPlan ?? MockApiClient.MOCK_BASE_PLAN
+    const usage = Math.min(plan.budgetGB * 0.95, 0.45 * runningLanes + Math.random() * 0.2)
+    const perAccountAvg = runningLanes > 0 ? usage / runningLanes : plan.perAccountEstimateGB
+    const remaining = Math.max(0, Math.floor((plan.budgetGB - usage) / plan.perAccountEstimateGB))
+    this.emit('memory', {
+      type: 'MEMORY',
+      jobId: simulation.handle.jobId,
+      platform: simulation.platform,
+      budgetGB: round2(plan.budgetGB),
+      projectChromeGB: round2(usage),
+      perAccountAvgGB: round2(perAccountAvg),
+      remainingCount: remaining,
+      level: 'info',
+      message: `mock: project=${usage.toFixed(2)}GB avg=${perAccountAvg.toFixed(2)}GB`,
+    } satisfies MemoryEvent)
+  }
+
   private syncHandleStatus(simulation: JobSimulation): void {
     const lanes = simulation.handle.lanes
     const running = lanes.some((lane) => lane.status === 'running' || lane.status === 'pending')
@@ -220,6 +265,11 @@ export class MockApiClient implements AppApi {
     this.stopSimulationForPlatform(jobPlatform)
 
     const handle = generateMockJobHandle(payload)
+    // 分账计划（仿真口径）：单平台满额；另一平台并行时按「全局预算 − 对方
+    // 已授予份额、下限 1 账号」的剩余分账语义合成——与主进程
+    // electron/memory/planner#allocateBudget 同一公式（渲染层不可 import
+    // electron/，故内联迷你版），供执行页分平台预算仪表演示。
+    handle.memoryPlan = this.synthesizeMemoryPlan(jobPlatform)
     const simulation: JobSimulation = {
       jobId: handle.jobId,
       platform: jobPlatform,
@@ -629,9 +679,9 @@ export class MockApiClient implements AppApi {
     return this.onWithCleanup('result', callback)
   }
 
-  onMemory(_callback: (e: import('./types').MemoryEvent) => void): () => void {
-    // Mock mode never emits MEMORY events.
-    return () => {}
+  onMemory(callback: (e: import('./types').MemoryEvent) => void): () => void {
+    // Mock 仿真按平台发射合成 MEMORY 事件（见 simulateJob 的 tick）。
+    return this.onWithCleanup('memory', callback)
   }
 
   onMemorySupervision(_callback: (e: import('./types').MemorySupervisionEvent) => void): () => void {
@@ -756,6 +806,9 @@ export class MockApiClient implements AppApi {
         message: `Running ${phase.name}: ${phase.message ?? ''}`.trim(),
         timestamp: Date.now(),
       } satisfies ProgressEvent)
+
+      // 合成 MEMORY 快照（执行页分平台预算仪表的数据源）。
+      this.emitMockMemory(simulation, runningLanes.length)
 
       this.addLog('info', `[${simulation.platform}] ${phase.name} ${Math.round(phase.progress)}%`,
         simulation.handle.jobId, simulation.platform)

@@ -409,6 +409,9 @@ export const useExecutionStore = defineStore('execution', () => {
       const handle = await api.startJob(payload)
       slot.jobId = handle.jobId
       mergeHandle(slot, handle)
+      // 启动即写入该平台的任务份额计划（mock 仿真自带；Electron 真实计划
+      // 随后由 refreshStatus 的 JobStatus.memoryPlan 覆盖）。
+      useMemoryStore().setPlan(platform, handle.memoryPlan ?? null)
       useMemoryStore().start()
       registerEventListeners()
       startSlotTimer(slot)

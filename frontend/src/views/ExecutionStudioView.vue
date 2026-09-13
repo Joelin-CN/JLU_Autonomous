@@ -6,6 +6,12 @@
       <p class="empty-state__text">从「课程总览」页面选择账号与课程并启动任务后，这里会显示实时执行进度</p>
     </div>
 
+    <!-- ── Memory Supervision（策略 C 介入提示；未介入不打扰）── -->
+    <div v-if="supervisionActive" class="supervision" role="status">
+      <span class="supervision__icon">🛡️</span>
+      <span class="supervision__text">{{ memoryStore.supervision?.message }}</span>
+    </div>
+
     <!-- ── Per-platform task groups（双平台并行时各一组，独立控制）── -->
     <section v-for="slot in visibleSlotList" :key="slot.platform" class="task-group">
       <!-- ── Runtime Banner ── -->
@@ -41,6 +47,24 @@
             class="btn btn--outline"
             @click="executionStore.reset(slot.platform)"
           >关闭</button>
+        </div>
+      </GlassmorphicPanel>
+
+      <!-- ── Memory Budget（分平台：运行/暂停中显示该平台份额仪表）── -->
+      <GlassmorphicPanel
+        v-if="slot.status === 'running' || slot.status === 'paused'"
+        class="memory-panel"
+        padding="12px 22px"
+      >
+        <div class="memory-panel__row">
+          <span class="memory-panel__title">内存预算</span>
+          <BudgetGauge
+            compact
+            :mock="isMock"
+            :plan="memoryStore.planFor(slot.platform)"
+            :project-chrome-gb="memoryStore.latestFor(slot.platform)?.projectChromeGB ?? 0"
+            :remaining-count="memoryStore.latestFor(slot.platform)?.remainingCount ?? null"
+          />
         </div>
       </GlassmorphicPanel>
 
@@ -147,10 +171,13 @@ import GlassmorphicPanel from '@/shared/ui/GlassmorphicPanel.vue'
 import GlassmorphicCard from '@/shared/ui/GlassmorphicCard.vue'
 import ProgressBar from '@/shared/ui/ProgressBar.vue'
 import Chip from '@/shared/ui/Chip.vue'
+import BudgetGauge from '@/shared/ui/BudgetGauge.vue'
 import { useExecutionStore } from '@/app/stores/execution.store'
 import type { ExecutionSlot } from '@/app/stores/execution.store'
 import { useAccountStore } from '@/app/stores/account.store'
 import { useCampaignStore } from '@/app/stores/campaign.store'
+import { useMemoryStore } from '@/app/stores/memory.store'
+import { isMockMode } from '@/shared/lib/apiClient'
 import { PLATFORM_META } from '@/shared/lib/platforms'
 import type { Platform } from '@/shared/lib/types'
 import { maskLogin } from '@/shared/lib/mask'
@@ -158,11 +185,16 @@ import { maskLogin } from '@/shared/lib/mask'
 const executionStore = useExecutionStore()
 const accountStore = useAccountStore()
 const campaignStore = useCampaignStore()
+const memoryStore = useMemoryStore()
+const isMock = isMockMode()
 
 /** 双平台并行：每个有数据的平台槽渲染一组 banner/阶段/泳道/统计。 */
 const visibleSlotList = computed(() => executionStore.visibleSlots)
 
 const anyActivity = computed(() => visibleSlotList.value.length > 0)
+
+/** 内存监督（策略 C）只在介入后显示提示条。 */
+const supervisionActive = computed(() => memoryStore.supervision?.state === 'engaged')
 
 // Reconcile with main-process truth on mount: if a terminal event was missed
 // (e.g. the Python process failed to spawn while this view was not mounted),
@@ -349,6 +381,35 @@ function totalSections(slot: ExecutionSlot): number {
 .banner__actions {
   display: flex;
   gap: 8px;
+}
+
+/* ── Memory supervision banner ── */
+.supervision {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  font-size: 13px;
+  color: var(--text);
+}
+.supervision__icon { font-size: 16px; }
+.supervision__text { line-height: 1.5; }
+
+/* ── Memory panel（分平台预算仪表）── */
+.memory-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.memory-panel__title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 /* ── Buttons ── */

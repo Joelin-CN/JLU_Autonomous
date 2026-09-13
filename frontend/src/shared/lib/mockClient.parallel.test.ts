@@ -121,4 +121,40 @@ describe('MockApiClient 双平台并行任务模拟', () => {
     // 演示工单必须给出可解析的数字 accountId，否则提交/跳过会报错压按钮
     expect(Number.isInteger(Number(demo?.accountId))).toBe(true)
   })
+
+  it('仿真发射合成 MEMORY 事件：平台盖章 + budgetGB 来自该仿真的份额计划', async () => {
+    const client = new MockApiClient()
+    const events: Array<{ jobId?: string; platform?: string; budgetGB: number }> = []
+    client.onMemory((e) => events.push({ jobId: e.jobId, platform: e.platform, budgetGB: e.budgetGB }))
+
+    const cx = await start(client, payload('chaoxing', ['0', '1']))
+    // 单平台满额（仿真全局预算 13.5GB）
+    expect(cx.memoryPlan?.budgetGB).toBeCloseTo(13.5)
+
+    await vi.advanceTimersByTimeAsync(1500)
+
+    const cxEvents = events.filter((e) => e.jobId === cx.jobId)
+    expect(cxEvents.length).toBeGreaterThan(0)
+    expect(cxEvents.every((e) => e.platform === 'chaoxing')).toBe(true)
+    expect(cxEvents.every((e) => e.budgetGB === cx.memoryPlan!.budgetGB)).toBe(true)
+  })
+
+  it('双平台并行时按剩余分账：后来者份额 = 全局 − 先到者已授予（下限 1 账号）', async () => {
+    const client = new MockApiClient()
+    const cx = await start(client, payload('chaoxing', ['0']))
+    const zh = await start(client, payload('zhihuishu', ['0']))
+
+    expect(cx.memoryPlan?.budgetGB).toBeCloseTo(13.5)
+    // 13.5 − 13.5 → clamp 到单账号最低保障 0.7（与主进程 allocateBudget 同语义）
+    expect(zh.memoryPlan?.budgetGB).toBeCloseTo(0.7)
+    // 红线保持全机值（双进程共享 fail-closed 急停线）
+    expect(zh.memoryPlan?.systemLimitGB).toBeCloseTo(cx.memoryPlan!.systemLimitGB)
+
+    const events: Array<{ platform?: string; budgetGB: number }> = []
+    client.onMemory((e) => events.push({ platform: e.platform, budgetGB: e.budgetGB }))
+    await vi.advanceTimersByTimeAsync(1500)
+    const zhEvents = events.filter((e) => e.platform === 'zhihuishu')
+    expect(zhEvents.length).toBeGreaterThan(0)
+    expect(zhEvents.every((e) => e.budgetGB <= 0.7 + 1e-9)).toBe(true)
+  })
 })
