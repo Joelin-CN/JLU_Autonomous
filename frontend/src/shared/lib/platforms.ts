@@ -89,9 +89,8 @@ export const PLATFORM_CAPABILITIES: Record<Platform, PlatformCapabilities> = {
       scanOnly: true,
       fullAuto: true,
       fullAutoLabel: '全自动（视频）',
-      // M4（答题求解）未落地 —— docs/roadmap/zhihuishu.md。
-      solveOnly: false,
-      solveOnlyHint: '智慧树答题求解（M4）开发中，当前仅支持视频任务',
+      // M4（答题求解）已落地 —— docs/roadmap/zhihuishu.md §7。
+      solveOnly: true,
       contentOnly: false,
       contentOnlyHint: '智慧树内容任务即视频任务，请使用「全自动（视频）」',
       dryRun: true,

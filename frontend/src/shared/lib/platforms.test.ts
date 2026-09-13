@@ -43,15 +43,15 @@ describe('platforms registry', () => {
     expect(PLATFORM_CAPABILITIES.chaoxing.qrLogin).toBe(false)
   })
 
-  it('capability matrix: zhihuishu gates quiz solving (M4) behind a hint', () => {
+  it('capability matrix: zhihuishu opens quiz solving (M4 landed)', () => {
     const caps = PLATFORM_CAPABILITIES.zhihuishu.tasks
     expect(caps.scanOnly).toBe(true)
     expect(caps.fullAuto).toBe(true)
     expect(caps.fullAutoLabel).toContain('视频')
-    // M4 (quiz solving) is not implemented — the button must be disabled AND
-    // explain why.
-    expect(caps.solveOnly).toBe(false)
-    expect(caps.solveOnlyHint).toContain('M4')
+    // M4（答题求解）已落地——「仅刷题」按钮开放，不再置灰。
+    expect(caps.solveOnly).toBe(true)
+    expect(caps.solveOnlyHint).toBeUndefined()
+    // 内容任务即视频任务，仍引导到「全自动（视频）」。
     expect(caps.contentOnly).toBe(false)
     expect(caps.contentOnlyHint!.length).toBeGreaterThan(0)
     expect(caps.dryRun).toBe(true)
