@@ -256,3 +256,26 @@ class TestApiPhasesAndDispatch:
         assert cfg.quiz_only and not cfg.scan_only
         cfg2 = api_mod.RunConfig(mode="full")
         assert not cfg2.quiz_only and not cfg2.scan_only
+
+
+class TestFilterCourses:
+    def test_no_filter_passthrough(self):
+        from platforms.zhihuishu.api import filter_courses
+        cs = [{"name": "课A", "recruitId": "r1", "courseId": "c1"}]
+        assert filter_courses(cs, None) == cs
+        assert filter_courses(cs, "") == cs
+
+    def test_match_by_name_or_ids(self):
+        from platforms.zhihuishu.api import filter_courses
+        cs = [
+            {"name": "数字集成电路设计基础", "recruitId": "428215", "courseId": "1000003834"},
+            {"name": "其他课", "recruitId": "r2", "courseId": "c2"},
+        ]
+        assert filter_courses(cs, "428215") == [cs[0]]
+        assert filter_courses(cs, "数字集成电路") == [cs[0]]
+        assert filter_courses(cs, "c2") == [cs[1]]
+        assert filter_courses(cs, "428215,c2") == cs
+
+    def test_no_match_empty(self):
+        from platforms.zhihuishu.api import filter_courses
+        assert filter_courses([{"name": "x", "recruitId": "r", "courseId": "c"}], "zzz") == []

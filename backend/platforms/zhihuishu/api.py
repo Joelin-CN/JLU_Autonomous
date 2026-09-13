@@ -198,6 +198,26 @@ def max_concurrent_cfg():
         return None
 
 
+def filter_courses(courses: list, course_filter: str = None) -> list:
+    """按 --courses 令牌过滤课程（name/recruitId/courseId 任一匹配即保留）。
+
+    前端选中课程点启动时 Electron 会传 `--courses`（超星同款）；令牌来自
+    渲染层 Course.id（智慧树课程无单一 id 概念，按三字段宽松匹配）。
+    """
+    if not course_filter:
+        return courses
+    tokens = [t.strip() for t in str(course_filter).split(",") if t.strip()]
+    if not tokens:
+        return courses
+    out = []
+    for c in courses:
+        keys = {str(c.get("name", "")), str(c.get("recruitId", "")),
+                str(c.get("courseId", ""))}
+        if any(any(t == k or t in k for k in keys) for t in tokens):
+            out.append(c)
+    return out
+
+
 def _run_account(account_index: int, creds: dict, config) -> bool:
     # 生产路径由 core.orchestrator 构造 config 只传布尔；直接构造只传 mode——
     # RunConfig 双向自洽推导后这里只需读 flags（真机实测曾因读 config.mode
@@ -216,7 +236,7 @@ def _run_account(account_index: int, creds: dict, config) -> bool:
     _emit_progress(20, "已登录", account_index)
 
     _emit_phase("scan_courses")
-    courses = scan_courses()
+    courses = filter_courses(scan_courses(), getattr(config, "course", None))
     if not courses:
         _emit_progress(100, "未发现共享课", account_index)
         return True
@@ -302,6 +322,11 @@ def main() -> None:
                         help="Execution mode: full (video + quiz), scan_only "
                              "(scan + report), solve_only (quiz only, skip video)")
     parser.add_argument(
+        "--courses", type=str, default=None,
+        help="Comma-separated course filter tokens (name/recruitId/courseId; "
+             "Electron passes the renderer's selected course ids).",
+    )
+    parser.add_argument(
         "--grade-only", action="store_true", default=False,
         help="模拟运行: 章节测验完整导航→抽取→AI→填答但绝不提交（人工接管）；"
              "对齐超星 grade_only 语义，映射前端「模拟运行」开关。",
@@ -360,6 +385,7 @@ def main() -> None:
         _emit_phase("login")
         run_multi_account_generic(
             ModuleRunner(_sys.modules[__name__]), indices, mode=cli.mode,
+            course=cli.courses,
             grade_only=cli.grade_only, dry_run=cli.dry_run,
             max_concurrent=cli.max_concurrent, budget_gb=cli.budget_gb,
             system_limit_gb=cli.system_limit_gb,
