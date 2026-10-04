@@ -9,9 +9,10 @@
     - 不伪造心跳/不调用上报接口——播放器自行上报
     - 窗口不得最小化（由运行环境保证，见验证清单）
 
-弹题处理（视频进度被弹题阻塞时）：采用 406653 油猴脚本沉淀的
-「试选→页面在 .answer span 暴露正确答案→改选」纯 DOM 技巧，
-全部为真实点击；M4 将接入 AI 路由升级。
+弹题处理（视频进度被弹题阻塞时）：三层链路——406653 油猴脚本沉淀的
+「试选→页面在 .answer span 暴露正确答案→改选」纯 DOM 技巧第一优先；
+揭示失败走 AI 路由（core.ai.router，2026-09-13 M4 落地）；再失败关闭
+弹题发 hint 工单。全部为真实点击。
 """
 
 import json
@@ -218,11 +219,15 @@ async (page) => {
 
 
 def _handle_popup_quiz() -> bool:
-    """弹题处理（2026-09-12 全链路实测验证）。
+    """弹题处理（2026-09-12 全链路实测验证；2026-09-13 M4 接 AI 兜底）。
 
-    链路：试选第一项 → 页面在 .answer 揭示「正确答案：B」→ 按字母点
-    对应项（结构实测为 [A文, A母, B文, B母, ...] 交替，字母 L 的文本项
-    在 nth=L*2）→ 关闭 footer 按钮。全部真实点击；答题后由调用方恢复播放。
+    链路（三层）：
+    1) 试选第一项 → 页面在 .answer 揭示「正确答案：B」→ 按字母点对应项
+       （结构实测为 [A文, A图, B文, B图, ...] 交替，字母 L 的文本项在
+       nth=L*2）——确定性、零成本，第一优先；
+    2) 揭示失败 → 抽题面走 AI 路由（core.ai.router）作答后点击；
+    3) AI 也失败 → 关闭弹题发 hint 工单（人工处理），不卡视频流。
+    全部真实点击；答题后由调用方恢复播放。
     """
     probe = """
 async (page) => {
@@ -262,23 +267,100 @@ async (page) => {
         raw = st2.get("answer", "")
     except Exception:
         raw = ""
-    import re
-    m = re.search(r"正确答案[：:]\s*([A-Z,，\s]+)", raw)
-    letters = [c for c in (m.group(1) if m else "") if "A" <= c <= "Z"]
-    log(f"弹题答案揭示：{raw[:20] or '未揭示'} → 选 {letters or '保持试选'}")
+    from platforms.zhihuishu.solvers.quiz import parse_reveal_letters
+    letters = parse_reveal_letters(raw)
+    log(f"弹题答案揭示：{raw[:20] or '未揭示'} → 选 {letters or '待AI兜底'}")
 
-    # 3) 按字母点击对应文本项（nth = 字母序*2）
+    # 3) 揭示失败 → AI 兜底
+    if not letters:
+        letters = _solve_popup_with_ai(st)
+
+    # 4) 按字母点击对应文本项（nth = 字母序*2）
     for letter in letters or []:
         nth = (ord(letter) - ord("A")) * 2
         _click(f".dialog-test .topic-list .topic-item >> nth={nth}",
                f"弹题选项{letter}")
         human_delay(0.7, 0.15)
 
-    # 4) 关闭弹题
+    # 5) 仍无答案 → hint 工单（人工处理），不卡视频流
+    if not letters:
+        _popup_hint_ticket(st.get("title", ""))
+
+    # 6) 关闭弹题
     human_delay(0.8, 0.15)
     _click(".dialog-test .el-dialog__footer .btn", "弹题关闭")
     human_delay(1.2, 0.2)
     return True
+
+
+def _solve_popup_with_ai(state: dict) -> list:
+    """弹题 AI 兜底：抽取弹题题面+选项文本 → core.ai.router 作答 → 字母表。
+
+    返回空表表示兜底失败（调用方发 hint 工单）。
+    """
+    probe = """
+async (page) => {
+  const r = await page.evaluate(() => {
+    const dlg = document.querySelector('.el-dialog__wrapper.dialog-test')
+             || document.querySelector('.el-dialog');
+    if (!dlg) return JSON.stringify({has: false});
+    const typeText = (dlg.querySelector('.title-tit') || {}).innerText || '';
+    const title = (dlg.querySelector('.topic-title') || {}).innerText || '';
+    const options = [...dlg.querySelectorAll('.topic-list .topic-item, .topic-option-item')]
+      .map(o => (o.innerText || '').trim()).filter(Boolean);
+    return JSON.stringify({has: true, typeText: typeText.trim(), title: title.trim(), options});
+  });
+  return r;
+}
+"""
+    try:
+        st = _run_json(probe, timeout=15)
+    except Exception as e:
+        log(f"弹题题面抽取失败：{e}", "WARN")
+        return []
+    if not st.get("has") or not st.get("options"):
+        return []
+
+    from platforms.zhihuishu.solvers.quiz import (
+        build_ai_questions, detect_question_type, parse_answer_letters,
+    )
+    qtype = detect_question_type(st.get("typeText", ""), len(st["options"]))
+    questions = build_ai_questions([{
+        "type": qtype,
+        "stem": st.get("title", ""),
+        "options": st["options"],
+    }])
+    try:
+        from core.ai.router import ai_solve_quiz
+        answers = ai_solve_quiz(questions, "", "弹题")
+    except Exception as e:
+        log(f"弹题 AI 作答失败：{e}", "WARN")
+        return []
+    if not answers:
+        return []
+    answer = answers[0].get("answer")
+    letters = parse_answer_letters(answer)
+    if not letters and qtype == "judge":
+        # 判断型弹题：正确→第一项，错误→第二项（文本项在 nth 0/2）
+        import re as _re
+        if _re.search(r"正确|√", str(answer)):
+            letters = ["A"]
+        elif _re.search(r"错误|×", str(answer)):
+            letters = ["B"]
+    log(f"弹题 AI 兜底作答：{answer} → {letters}")
+    return letters
+
+
+def _popup_hint_ticket(title: str) -> None:
+    """弹题两层求解均失败 → 提示型工单（人工在窗口处理）。"""
+    ticket({
+        "id": f"zhihuishu-popup-quiz-{int(time.time())}",
+        "type": "warning",
+        "title": "智慧树弹题需人工作答",
+        "message": f"弹题「{title[:30]}」揭示法与 AI 兜底均未得出答案，已关闭弹题；"
+                   f"请稍后在课程页手动补答",
+        "resolved": True,  # 非阻塞提示：视频流继续，不需要等待人工
+    })
 
 
 def _report_lock_ticket(course_name: str) -> None:

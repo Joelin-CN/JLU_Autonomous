@@ -1,5 +1,5 @@
 <template>
-  <div class="gauge" :class="`gauge--${band}`">
+  <div :class="['gauge', `gauge--${band}`, { 'gauge--compact': compact }]">
     <div class="gauge__number">{{ remainingCount ?? '—' }}</div>
     <div class="gauge__label">剩余可开实例</div>
     <div class="gauge__bar">
@@ -21,10 +21,13 @@ const props = withDefaults(defineProps<{
   projectChromeGB?: number
   remainingCount?: number | null
   mock?: boolean
+  /** 紧凑横排变体：执行页分平台内存面板用（设置页保持大数字卡片）。 */
+  compact?: boolean
 }>(), {
   projectChromeGB: 0,
   remainingCount: null,
   mock: false,
+  compact: false,
 })
 
 const pct = computed(() => {
@@ -72,5 +75,33 @@ const band = computed(() => (pct.value < 60 ? 'ok' : pct.value < 85 ? 'warn' : '
   margin-top: 10px;
   font-size: 11px;
   color: var(--muted);
+}
+
+/* ── Compact 横排变体（执行页）── */
+.gauge--compact {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.gauge--compact .gauge__number {
+  font-size: 22px;
+  min-width: 36px;
+  text-align: center;
+}
+.gauge--compact .gauge__label {
+  margin: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.gauge--compact .gauge__bar {
+  flex: 1;
+  height: 6px;
+}
+.gauge--compact .gauge__meta {
+  margin: 0;
+  white-space: nowrap;
 }
 </style>

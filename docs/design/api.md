@@ -1,16 +1,32 @@
 # 前后端交互 API 文档 — JLU Autonomous
 
-> **版本**: v1.5
-> **更新**: 2026-09-12
+> **版本**: v1.7
+> **更新**: 2026-09-13
 > **审计**: 多 Agent 并行全代码库审查 + correctness pass 续轮校正
 > **目的**: 定义前端 (Electron + Vue 3) 与后端 (Python/JS 脚本) 之间的完整接口契约，供前后端独立开发和后续仓库融合使用。
+
+> **v1.7 变更**：内存监督（策略 C）+ 执行页分平台预算仪表 + 智慧树 M4 答题落地。新增主进程
+> push 通道 `on-memory-supervision`（§3.1/§10.2——系统占用逼近红线时对占用较大平台槽位整任务
+> 暂停 + 系统通知，只暂停不自动恢复）；§4.3 补 `MEMORY` 事件小节（字段口径原在 §10.2）；
+> 智慧树 `VALID_PHASES` 增 `solve_quiz`，`solve_only` 语义修正为「仅答题跳过视频」（此前是
+> `full` 的别名遗留缺陷），入口新增 `--grade-only`（模拟运行：填答不提交）/`--dry-run`（纯跳过）
+> 旗标；渲染层执行页每平台分组显示预算仪表（消费 `memory.store` 分桶 + mock 合成 MEMORY 事件）。
+
+> **v1.6 变更**：双平台并行任务执行——`job:start` 互斥从全局改为**同平台互斥、跨平台并行**
+>（每平台一个执行槽位）；spawn 时内存预算改为**动态剩余分账**（独跑全额、后启拿剩余/最低
+> 保障，`--system-limit-gb` 恒为全机值）；`JobStatus` 补 `platform`/`memoryPlan` 字段；
+> `job:resolve-ticket` 载荷新增可选 `jobId`（双任务时按它路由到对应平台进程）；8 个事件通道
+> 主进程转发时统一注入 `platform`（additive，NDJSON 协议本身不变）；智慧树入口补齐
+> `--max-concurrent` 等 4 个内存参数（与超星同构）；`accounts:add/edit/remove` 互斥改为
+> 按平台锁。渲染层 `execution.store` 槽位化（每平台独立 lanes/phases/计时），执行页按平台
+> 分组双 banner 展示。
 
 > **v1.5 变更**：同步智慧树 M0–M3 落地后的多平台现状——`StartJobPayload.platform` /
 > `ScanCoursesPayload.platform`（缺省 chaoxing）、spawn 入口 `platforms.<platform>.api|accounts|courses`
 > 与按平台凭据/会话隔离（`ZHIHUISHU_ACCOUNTS_FILE` / `ZHIHUISHU_HEADED` env 白名单、
 > `{platform}-chrome-{N}` 会话、`chrome-profiles/zhihuishu/account-N/` 档案）、`accounts:default-path`
 > 按平台返回 `passwords/<platform>.txt`。**NDJSON 8 事件协议无 breaking change**（§4.3 事件类型与
-> 字段结构平台无关）。渲染层（preload/ipcClient/store）的平台透传尚未合入 main，见 §3.2 `accounts:list` 备注。
+> 字段结构平台无关）。渲染层（preload/ipcClient/store）的平台透传已随 PR #3 合入。
 
 > **v1.4 变更**：同步 2026-08-13 代码现状（2026-08-22 修订：invoke 通道 28 个）。Pinia Store 9 个、
 > `courses:*` / `accounts:list` 已接真实后端、`--chromium-flags` 已移除、DeepSeek 完全移除
@@ -605,7 +621,7 @@ const IPC_CHANNELS = {
   DIALOG_OPEN_FILE:        'dialog:open-file',
   SYSTEM_VALIDATE_PYTHON:  'system:validate-python',
 
-  // Main → Renderer (push) — 8 个通道
+  // Main → Renderer (push) — 9 个通道
   ON_PROGRESS:      'on-progress',
   ON_PHASE_CHANGE:  'on-phase-change',
   ON_LOG:           'on-log',
@@ -614,6 +630,7 @@ const IPC_CHANNELS = {
   ON_ERROR:         'on-error',
   ON_RESULT:        'on-result',
   ON_MEMORY:        'on-memory',
+  ON_MEMORY_SUPERVISION: 'on-memory-supervision',
 } as const
 ```
 
@@ -629,29 +646,24 @@ const IPC_CHANNELS = {
 | `system:resources` | 实时 RAM/CPU/运行时长（Node `os` 采样，无 Python） |
 | `memory:plan` | 空闲时按当前机器状态计算的并发计划 |
 | `ai:status` / `ai:set` / `ai:test` | AI 配置读取 / 原子写 `doubao.txt` / 方舟连通性测试 |
-| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径；`default-path` 接受 `{ platform? }` 按平台返回 `passwords/<platform>.txt`（main 版 preload 暂未暴露参数，渲染层走默认 chaoxing） |
+| `accounts:add` / `accounts:edit` / `accounts:remove` / `accounts:default-path` | 账号文件原子增删改 + 默认路径（载荷含可选 `platform` / `accountsFile`，按平台路由 `platforms.<platform>.accounts`；`default-path` 接受 `{ platform? }` 按平台返回 `passwords/<platform>.txt`） |
 | `dialog:open-file` | 文件选择器（自定义账号文件） |
 | `on-memory` | 后端 `MEMORY` 事件推送（预算仪表） |
+| `on-memory-supervision` | 主进程内存监督介入推送（策略 C，仅 engaged 时发；见 §10.2） |
 
 ### 3.2 Invoke 通道详情
 
 #### `job:start`
 
 - **方向**: Renderer → Main
-- **请求**: `StartJobPayload { platform?: 'chaoxing' | 'zhihuishu', accountIds: number[], courseIds?: string[], mode?: 'full' | 'scan_only' | 'solve_only' }`
+- **请求**: `StartJobPayload { platform?: Platform, accountIds: number[], courseIds?: string[], mode?: 'full' | 'scan_only' | 'solve_only', options?: { dryRun?, focus? } }`
 - **返回**: `{ jobId: string }`
 - **限流**: 500ms 冷却
 - **校验**:
   - `accountIds`: 必填，最多 50 个，必须为正整数（支持 string → parseInt 转换）
-  - **RAM 安全检查**: 启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算最大并发，超预算账号排队分批执行；运行中每 5 秒实测收紧。
-  - **互斥检查**: 同一时间只允许一个活跃任务
-- **平台路由**（M1 多平台架构）: `platform` 缺省 `'chaoxing'`。PythonBridge 按 platform spawn
-  `python -m platforms.<platform>.api`（`chaoxing/` 兼容垫片保证旧入口 `python -m chaoxing.api` 语义不变）；
-  凭据文件按平台分流——chaoxing 走 `CHAOXING_ACCOUNTS_FILE`/`data/passwords/chaoxing.txt`，
-  zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`（默认 `data/passwords/zhihuishu.txt`）；
-  有头模式 zhihuishu 支持 `ZHIHUISHU_HEADED`（`CHAOXING_HEADED` 继续全平台生效）。
-  浏览器会话按 `{platform}-chrome-{N}` 隔离（zhihuishu 档案目录 `chrome-profiles/zhihuishu/account-N/`）。
-- **行为**: 创建 Job 记录 → 创建 PythonBridge → 绑定事件 → spawn Python 子进程
+  - **RAM 安全检查**: 启动前按 `(总内存 − 基线) × 75%` 与 CPU 线程数计算**全局**计划；另一平台已有活跃任务时按**动态剩余分账**取本任务份额（`allocateBudget`：份额 = clamp(全局预算 − 其他平台已授予之和, 最低保障 1 账号, 全局预算)，`--max-concurrent` 按份额重算，`--system-limit-gb` 恒为全机值——两进程共用同一 fail-closed 急停线，实际占用由两平台进程的全局测量闸门收敛，不超单机预算）。
+  - **互斥检查（v1.6）**: **同平台互斥、跨平台并行**——每平台一个执行槽位（`jobSlots.ts`），`platform` 的槽位被占用时抛 `平台 X 的任务 Y 正在运行…`；另一平台的活跃任务不阻塞启动。
+- **行为**: 创建 Job 记录 → 占用该平台槽位 → 创建 PythonBridge → 绑定事件 → spawn Python 子进程（`python -m platforms.<platform>.api`）；进程退出/完成/停止时释放槽位（`releaseIfCurrent` 防旧进程迟到事件误清新槽位）。
 
 #### `job:pause`
 
@@ -700,6 +712,8 @@ const IPC_CHANNELS = {
 interface JobStatus {
   jobId: string
   status: 'running' | 'paused' | 'completed' | 'stopped' | 'error'
+  /** 本次任务所属平台（job:start 时记录；v1.6 起渲染层直接读它回填 JobHandle.platform）。 */
+  platform?: 'chaoxing' | 'zhihuishu'
   phase: JobPhase
   progress: number           // 0–100
   message?: string
@@ -709,6 +723,8 @@ interface JobStatus {
   courseIds?: string[]
   phaseIndex?: number
   lanes?: JobLaneStatus[]
+  /** 本任务的内存计划（v1.6 双平台并行时为动态剩余分账后的份额）。 */
+  memoryPlan?: MemoryPlan
 }
 
 interface JobLaneStatus {
@@ -726,7 +742,13 @@ type JobPhase =
   | 'completed' | 'paused' | 'stopped' | 'error'
 ```
 
-> `ElectronApiClient.getJobStatus` 会将 `JobStatus` 重整为渲染侧 `JobHandle`：`phases`/`objective`/`strategy`/`createdAt` 取自 `startJob` 时缓存的 `currentHandle`（后端 `JobStatus` 不携带这些字段），`startedAt`/`finishedAt`(→`completedAt`) 由 ISO 字符串解析为 epoch ms。
+> `ElectronApiClient.getJobStatus` 会将 `JobStatus` 重整为渲染侧 `JobHandle`：`phases`/`objective`/`strategy`/`createdAt` 取自 `startJob` 时缓存的 handle（**v1.6 起按 jobId 键控为 Map**，双任务各自持份互不串扰），`platform` 优先读后端 `JobStatus.platform`；`startedAt`/`finishedAt`(→`completedAt`) 由 ISO 字符串解析为 epoch ms。无 `jobId` 调用（旧渲染层兼容路径）在恰有一个活跃任务时返回它，双任务并行时抛 `当前有多个并行任务，查询时需指定 jobId。`
+
+#### `job:resolve-ticket`
+
+- **方向**: Renderer → Main
+- **请求**: `ResolveTicketPayload { jobId?: string, ticketId: string, accountId: number, answer?: string, action?: 'skip' }`
+- **行为（v1.6）**: 携带 `jobId` 时按它路由到对应平台槽位的 PythonBridge；未携带时回落「唯一活跃任务」（双任务并行且无 jobId 时抛错）。`jobId` 仅用于主进程路由，**不透传给 Python**——stdin 上的 `RESOLVE_TICKET` payload 不变（见 §4.2）。
 
 #### `courses:scan`
 
@@ -763,19 +785,16 @@ interface CourseSection {
 #### `courses:list`
 
 - **方向**: Renderer → Main
-- **请求**: `accountId: number`
+- **请求**: `accountId: number, platform?: 'chaoxing' | 'zhihuishu'`（可选第二参数，缺省 chaoxing）
 - **返回**: `Course[]`
-- **当前状态**: ✅ 已接真实后端（同上）
+- **当前状态**: ✅ 已接真实后端（同上，按 platform 路由 `platforms.<platform>.courses`）
 
 #### `accounts:list`
 
 - **方向**: Renderer → Main
-- **请求**: 无
+- **请求**: `{ platform?: 'chaoxing' | 'zhihuishu'; accountsFile?: string }`（可选；缺省 chaoxing）
 - **返回**: `Account[]`（Electron 内部类型）
-- **当前状态**: ✅ 已接真实后端——`python -m chaoxing.accounts` 读取当前账号文件。
-  主进程侧 `runAccountsCommand` 已支持 platform 参数（spawn `platforms.<platform>.accounts`、
-  zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE` 默认 `data/passwords/zhihuishu.txt`），但 preload
-  暂未暴露该参数（渲染层固定走 chaoxing 账号文件）——渲染层平台透传见后续前端多平台 PR
+- **当前状态**: ✅ 已接真实后端——`python -m platforms.<platform>.accounts` 读取对应平台账号文件（`passwords/<platform>.txt` 或 `accountsFile` 覆盖；主进程为 zhihuishu 注入 `ZHIHUISHU_ACCOUNTS_FILE`，preload 已透传 platform 参数）
 
 ```typescript
 interface Account {
@@ -920,7 +939,9 @@ interface Ticket {
   type: 'captcha' | 'verification' | 'warning' | 'error'
   title: string
   message: string
-  imageBase64?: string        // 验证码截图
+  imageBase64?: string        // 验证码截图 / 扫码登录二维码
+  timeoutSeconds?: number     // 等待上限（秒）——智慧树扫码登录工单自带
+  platform?: Platform         // 主进程转发时按当前任务平台注入（后端 TICKET 事件本身不携带）
   options?: string[]
   resolved: boolean
   resolution?: string
@@ -928,6 +949,11 @@ interface Ticket {
   resolvedAt?: string
 }
 ```
+
+> 渲染层按字段组合判别交互形态（`shared/lib/ipcClient.ts` 的 `classifyTicketKind`）：
+> `imageBase64 + timeoutSeconds` → 扫码型（二维码 + 倒计时，扫码后自动 resolved）；
+> captcha 类型无 `imageBase64` → 提示型（智慧树滑块，纯文字指引）；
+> 其余 → 输入型（超星验证码图片 + 文本输入）。后端后续可发显式 kind 字段消除启发式。
 
 #### `on-completed`
 
@@ -984,24 +1010,27 @@ spawn('python', ['-m', 'platforms.<platform>.api', ...args], {
 })
 ```
 
-**入口**: `python -m platforms.<platform>.api`（M1 多平台布局；`<platform>` 为 `chaoxing` 或
-`zhihuishu`，由 `job:start` 的 `StartJobPayload.platform` 决定，缺省 `chaoxing`）。
-`backend/chaoxing/` 兼容垫片保留旧入口 `python -m chaoxing.api` —— sys.modules 别名 +
-`-m` 入口自替换转发，旧命令与 monkeypatch 语义完全不变。两平台共用同一 NDJSON 事件协议
-（§4.3，**协议无 breaking change**——8 个事件类型与字段结构平台无关，差异只在业务 payload 内容）。
+**入口**: `python -m platforms.<platform>.api`（超星 `platforms.chaoxing.api`、智慧树 `platforms.zhihuishu.api`；双平台并行时各起一个独立子进程，每平台一个执行槽位）
+（`backend/chaoxing/` 兼容垫片保留旧入口 `python -m chaoxing.api`，旧命令与 monkeypatch 语义不变；缺省 `chaoxing`。）
 
-**命令行参数**:
+**命令行参数**（两平台同构；v1.6 起智慧树同样接受全部内存参数——此前智慧树 argparse 未定义会导致 UI 启动直接失败）:
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `--job-id` | `string` | 任务唯一标识 |
 | `--accounts` | `string` | 逗号分隔的账号 ID 列表 |
 | `--mode` | `string` | `full` / `scan_only` / `solve_only` |
+| `--grade-only` | `flag` | 模拟运行：答题走完整导航→抽取→AI→填答但**绝不提交**（映射前端「模拟运行」开关；超星自 2026-08 起支持，智慧树 v1.7 起随 M4 落地） |
+| `--dry-run` | `flag` | 答题阶段纯跳过（零导航零提交；CLI/测试用，前端不映射） |
 | `--courses` | `string` | 逗号分隔的课程 ID 列表（可选） |
 | `--max-concurrent` | `int` | 运行时信号量大小（Electron 按内存/CPU 计划计算） |
 | `--budget-gb` | `float` | 项目内存预算（GB） |
 | `--system-limit-gb` | `float` | 系统已用内存急停阈值 |
 | `--per-account-estimate-gb` | `float` | 初始单 Chrome 实例估算 |
+
+**模式语义（v1.7 修正）**：智慧树 `solve_only` 此前是 `full` 的别名（遗留缺陷），现为
+**仅答题跳过视频**——扫描后直接进入 M4 答题阶段；`full` = 视频先跑完再答题。智慧树
+`VALID_PHASES` 相应补 `solve_quiz`（与超星对齐）。超星 `solve_only` 语义不变（仅刷题）。
 
 **Chromium 内存优化参数**（由 Bridge 自动注入）:
 ```
@@ -1079,6 +1108,11 @@ spawn('python', ['-m', 'platforms.<platform>.api', ...args], {
 ### 4.3 stdout JSON-line 事件协议
 
 Python 子进程通过 stdout 输出 **每行一个 JSON 对象**。主进程逐行解析并分发到对应的事件通道。
+
+> **platform 盖章（v1.6）**: 后端事件本身不携带平台；主进程转发到渲染层时按槽位平台给全部
+> 8 类事件统一注入 `platform` 字段（`{ ...event, platform }`，additive——NDJSON 协议与通道名
+> 不变）。双平台并行时渲染层据此 + `jobId` 把事件路由到对应平台的执行槽位；`MEMORY` 事件
+> 为进程级快照（无账号维度），`platform` 是它分桶显示的唯一依据。
 
 #### `PROGRESS` — 进度更新
 
@@ -1218,6 +1252,33 @@ Python 子进程通过 stdout 输出 **每行一个 JSON 对象**。主进程逐
 ```
 
 **触发时机**: 所有课程处理完毕，正常退出。
+
+---
+
+#### `MEMORY` — 内存快照（v1.7 补文档，协议自 2026-08-13 起存在）
+
+```json
+{
+  "type": "MEMORY",
+  "jobId": "job_1719312000000_a1b2c3",
+  "budgetGB": 12.9,
+  "projectChromeGB": 1.1,
+  "perAccountAvgGB": 0.55,
+  "remainingCount": 17,
+  "level": "info",
+  "message": "project=1.10GB avg=0.55GB"
+}
+```
+
+**字段**: `budgetGB` 本进程预算份额；`projectChromeGB` 项目 Chrome 进程树实测占用；
+`perAccountAvgGB` 单账号 EWMA 均值；`remainingCount` 预算内还可开的实例数；
+`level`：`info` 常规 / `critical` 急停已触发。
+
+**特性**: 进程级快照（无账号维度、后端不带 `platform`）；仅当 spawn 传了
+`--system-limit-gb` 时由 `core.memory.MemoryMonitor` 每 5s 发射；主进程转发时统一
+盖 `platform` 章——它是渲染层按平台分桶显示（执行页预算仪表）的唯一依据，也是
+内存监督器（§10.2）观测各平台占用的数据源。mock 模式由 `MockApiClient` 每 tick
+合成同构事件（份额口径与 `allocateBudget` 一致）。
 
 ### 4.4 生命周期管理
 
@@ -1695,11 +1756,31 @@ AttentionQueueView — 使用 3 个 Store: Attention, Campaign, Log
 ### 10.2 协议事件
 
 - `PROGRESS` 新增可选 `accountId`（整数）与 `laneStatus`（`queued` / `running` / `error`）。
-- 新增 `MEMORY` 事件：
+- 新增 `MEMORY` 事件（字段口径见 §4.3 MEMORY 小节）：
 
 ```json
 {"type":"MEMORY","jobId":"...","budgetGB":12.9,"projectChromeGB":1.1,
  "perAccountAvgGB":0.55,"remainingCount":17,"level":"info","message":"..."}
+```
+
+**内存监督（策略 C，v1.7）**——主进程 Electron 层行为，不涉及 NDJSON 协议：
+
+- `electron/memory/supervision.ts`（纯函数）+ `supervisor.ts`（IO 编排）：
+  10s 定时器用 `planner.measureSystemUsedGB` 自测系统占用，叠加双路 MEMORY 事件
+  喂入的各平台 `projectChromeGB`；`systemUsedGB ≥ systemLimitGB − 1GB`（预警线）
+  时对「运行中且未被监督暂停」的槽位里占用最大者执行**整任务暂停**（与用户手动
+  暂停同一路径：`bridge.pause()` + `JobStatus` 同步）+ 系统 `Notification`
+  （沿用 `settings.notifications` 门控）+ 推送渲染层。
+- **只暂停不自动恢复**（防抖动：内存不会因暂停瞬间回落）；恢复由用户在执行页
+  手动「全部继续」，resume 时清除该平台的介入标记（再越线允许重新介入）。
+- 两次介入之间 60s 冷却（防暂停风暴）；无可暂停对象（全暂停/无运行槽位）不动作，
+  红线兜底仍由后端 MemoryMonitor 的 fail-closed 急停负责。
+- 渲染层推送通道 `on-memory-supervision`（仅介入时发，armed 不打扰）：
+
+```json
+{"type":"MEMORY_SUPERVISION","state":"engaged","systemUsedGB":27.8,
+ "thresholdGB":27.5,"systemLimitGB":28.5,"platform":"zhihuishu",
+ "at":"2026-09-13T08:00:00.000Z","message":"系统内存 27.8GB 逼近红线 27.5GB，已自动暂停 zhihuishu 任务（恢复请手动点击「继续」）。"}
 ```
 
 ### 10.3 账号与 AI 子命令
@@ -1716,3 +1797,10 @@ AttentionQueueView — 使用 3 个 Store: Attention, Campaign, Log
   `最大并发 = min(⌊预算/0.7⌋, cpuCap)`。
 - 运行中：后端每 5 秒采样项目 Chrome 进程树，实测 EWMA 收紧开闸；
   系统总占用逼近上限且项目自身为主因且连续两次不回落时急停。
+- **双平台并行（v1.6）**：spawn 时动态剩余分账——独跑拿全额预算，后启任务拿
+  `clamp(全局预算 − 其他平台已授予, 最低保障 1 账号, 全局预算)`，`--max-concurrent` 按份额
+  重算；「授予额」允许受控超卖，但两平台 Python 进程的内存闸门（`gate_open`）实测的都是
+  全局 Chrome 占用（profile 同根目录），实际内存天然收敛不超单机预算；`--system-limit-gb`
+  恒为全机值，两进程共用同一 fail-closed 急停线。智慧树进程自 v1.6 起接入同一套
+  gate/monitor 钩子（`platforms/zhihuishu/api.py` 挂 `core.memory` 的
+  `MemoryMonitor`/`gate_open`/`measure_project_chrome_gb`）。

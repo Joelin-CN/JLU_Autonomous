@@ -1,7 +1,8 @@
 /**
- * Shared PII masking helpers — one format everywhere (phone logins are the
- * norm for Chaoxing accounts). `132****3918`: keep the first 3 and last 4
- * digits when possible; short/odd values degrade gracefully.
+ * Shared PII masking helpers — one format everywhere. Phone logins are the
+ * norm for chaoxing accounts (`132****3918`: keep the first 3 and last 4
+ * digits); other identifiers (zhihuishu student ids, emails) degrade to a
+ * head+tail mask via maskLogin(). Short/odd values degrade gracefully.
  */
 export function maskPhone(phone: string): string {
   const value = String(phone ?? '').trim()

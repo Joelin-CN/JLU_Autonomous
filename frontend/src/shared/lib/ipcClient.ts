@@ -1,21 +1,24 @@
 import type {
   Account,
   AIProvider,
+  AppApi,
   Balance,
-  ChaoxingApi,
   CompletionEvent,
   Course,
   ErrorEvent,
   JobHandle,
   ModeType,
   PhaseChangeEvent,
+  Platform,
   ProgressEvent,
   Settings,
   StartJobPayload,
   SystemResources,
   Ticket,
+  TicketKind,
   MemoryEvent,
   MemoryPlan,
+  MemorySupervisionEvent,
   AiStatus,
   AiTestResult,
 } from './types'
@@ -44,6 +47,13 @@ function mapMode(mode: string): 'full' | 'scan_only' | 'solve_only' {
   return 'full'
 }
 
+/** 解析 ISO 字符串 / epoch 毫秒为时间戳；非法或缺失返回 null。 */
+function _parseEpochMs(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const ms = new Date(value).getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
 function mapBackMode(mode?: 'full' | 'scan_only' | 'solve_only'): ModeType {
   if (mode === 'scan_only') return 'course-scan'
   if (mode === 'solve_only') return 'batch-exec'
@@ -58,9 +68,24 @@ function mapQuizSolver(_solver?: string): AIProvider {
 }
 
 // Maps the Electron-layer Ticket (type/imageBase64/options, ISO timestamps)
-// to the renderer Ticket (severity, ms timestamps). Captcha tickets are
+// to the renderer Ticket (severity, ms timestamps). Interactive tickets are
 // surfaced as 'critical' and carry kind/imageBase64/options through so the
 // interactive captcha modal can render and resolve them.
+//
+// Interactive FORM discrimination is inferred from the field combination the
+// backends already emit (the NDJSON TICKET payload itself carries no form
+// field — the backend can add an explicit one later to remove the heuristic):
+//   - imageBase64 + timeoutSeconds → 'qrcode'  (zhihuishu QR login, auth.py)
+//   - captcha type without image   → 'hint'    (zhihuishu slider: drag in the
+//                                               visible browser window)
+//   - otherwise                    → 'captcha' (chaoxing image + text input)
+export function classifyTicketKind(ticket: any, isCaptchaType: boolean): TicketKind | undefined {
+  if (!isCaptchaType) return undefined
+  if (!ticket.imageBase64) return 'hint'
+  if (typeof ticket.timeoutSeconds === 'number' && ticket.timeoutSeconds > 0) return 'qrcode'
+  return 'captcha'
+}
+
 function mapElectronTicket(ticket: any): Ticket {
   const isCaptcha = ticket.type === 'captcha' || ticket.type === 'verification'
   const severity: Ticket['severity'] = isCaptcha
@@ -73,16 +98,23 @@ function mapElectronTicket(ticket: any): Ticket {
 
   return {
     id: ticket.id,
+    jobId: ticket.jobId,
     title: ticket.title,
     message: ticket.message,
     severity,
     accountId: ticket.accountId != null ? String(ticket.accountId) : undefined,
     resolved: ticket.resolved,
-    resolvedAt: ticket.resolvedAt ? new Date(ticket.resolvedAt).getTime() : undefined,
+    resolvedAt: _parseEpochMs(ticket.resolvedAt) ?? undefined,
     resolution: ticket.resolution,
-    createdAt: new Date(ticket.createdAt).getTime(),
-    kind: isCaptcha ? 'captcha' : undefined,
+    // 后端工单并非都带 createdAt（智慧树扫码/滑块工单历史上就没盖）——解析
+    // 失败回落当前时刻，避免倒计时落到 NaN:NaN。
+    createdAt: _parseEpochMs(ticket.createdAt) ?? Date.now(),
+    kind: classifyTicketKind(ticket, isCaptcha),
     imageBase64: ticket.imageBase64,
+    timeoutSeconds: typeof ticket.timeoutSeconds === 'number' ? ticket.timeoutSeconds : undefined,
+    // Injected by the Electron main process from the running job's platform
+    // (the backend TICKET event itself is platform-agnostic).
+    platform: ticket.platform === 'zhihuishu' || ticket.platform === 'chaoxing' ? ticket.platform : undefined,
     options: Array.isArray(ticket.options) ? ticket.options : undefined,
   }
 }
@@ -109,14 +141,18 @@ function mapElectronCourse(raw: any): Course {
   }
 }
 
-export class ElectronApiClient implements ChaoxingApi {
+export class ElectronApiClient implements AppApi {
   private cleanupFns: Array<() => void> = []
-  private currentHandle: JobHandle | null = null
+  /** 每个 jobId 一份本地快照（mode/objective 等渲染层专属字段回填用）。
+   *  双平台并行时两个任务各自持份，互不串扰。 */
+  private handles = new Map<string, JobHandle>()
 
   async startJob(payload: StartJobPayload): Promise<JobHandle> {
-    this.dispose()
+    // 双平台并行：不清既有监听（多任务事件按 jobId 路由），只记新 handle。
     const api = requireAPI()
+    const platform: Platform = payload.platform ?? 'chaoxing'
     const result = await api.startJob({
+      platform,
       accountIds: payload.accounts.map((id) => Number.parseInt(id, 10)),
       courseIds: payload.courses,
       mode: mapMode(payload.mode),
@@ -133,9 +169,10 @@ export class ElectronApiClient implements ChaoxingApi {
       message,
     }))
 
-    this.currentHandle = {
+    this.handles.set(result.jobId, {
       jobId: result.jobId,
       status: 'running',
+      platform,
       createdAt: Date.now(),
       startedAt: Date.now(),
       objective: payload.objective,
@@ -153,8 +190,8 @@ export class ElectronApiClient implements ChaoxingApi {
         currentTask: index === 0 ? 'Starting...' : 'Queued...',
         currentPhase: phases[0]?.name,
       })),
-    }
-    return this.currentHandle
+    })
+    return this.handles.get(result.jobId)!
   }
 
   async pauseJob(jobId: string, accountIds?: string[]): Promise<void> {
@@ -185,11 +222,12 @@ export class ElectronApiClient implements ChaoxingApi {
 
   async getJobStatus(jobId: string): Promise<JobHandle> {
     const raw = await requireAPI().getJobStatus(jobId) as any
-    const mode = this.currentHandle?.mode ?? mapBackMode(raw.mode)
+    const known = this.handles.get(jobId)
+    const mode = known?.mode ?? mapBackMode(raw.mode)
     const modeConfig = MODES.find((item) => item.key === mode)
-    const phaseIndex = typeof raw.phaseIndex === 'number' ? raw.phaseIndex : this.currentHandle?.phaseIndex ?? 0
+    const phaseIndex = typeof raw.phaseIndex === 'number' ? raw.phaseIndex : known?.phaseIndex ?? 0
     // Always recompute the stepper from phaseIndex + global progress. The
-    // old "prefer currentHandle.phases" shortcut replayed the snapshot taken
+    // old "prefer known.phases" shortcut replayed the snapshot taken
     // at startJob() forever, overwriting live event-driven updates.
     const phases = (modeConfig?.phases ?? []).map(([name, message], index) => ({
       name,
@@ -201,14 +239,19 @@ export class ElectronApiClient implements ChaoxingApi {
     const handle: JobHandle = {
       jobId: raw.jobId,
       status: raw.status,
-      createdAt: this.currentHandle?.createdAt ?? Date.now(),
-      startedAt: raw.startedAt ? new Date(raw.startedAt).getTime() : this.currentHandle?.startedAt,
-      completedAt: raw.finishedAt ? new Date(raw.finishedAt).getTime() : this.currentHandle?.completedAt,
-      objective: this.currentHandle?.objective ?? 'catchup',
-      strategy: this.currentHandle?.strategy ?? 'balanced',
+      // Backend JobStatus carries platform (recorded at job:start); fall back
+      // to the one recorded locally for pre-upgrade jobs.
+      platform: raw.platform === 'zhihuishu' || raw.platform === 'chaoxing'
+        ? raw.platform
+        : known?.platform,
+      createdAt: known?.createdAt ?? Date.now(),
+      startedAt: raw.startedAt ? new Date(raw.startedAt).getTime() : known?.startedAt,
+      completedAt: raw.finishedAt ? new Date(raw.finishedAt).getTime() : known?.completedAt,
+      objective: known?.objective ?? 'catchup',
+      strategy: known?.strategy ?? 'balanced',
       mode,
-      courseCount: raw.courseIds?.length ?? this.currentHandle?.courseCount ?? 0,
-      accountCount: raw.accountIds?.length ?? this.currentHandle?.accountCount ?? 0,
+      courseCount: raw.courseIds?.length ?? known?.courseCount ?? 0,
+      accountCount: raw.accountIds?.length ?? known?.accountCount ?? 0,
       progress: raw.progress,
       phaseIndex,
       phases,
@@ -223,22 +266,22 @@ export class ElectronApiClient implements ChaoxingApi {
       memoryPlan: raw.memoryPlan,
     }
 
-    this.currentHandle = handle
+    this.handles.set(jobId, handle)
     return handle
   }
 
-  async scanCourses(accountIds?: string[]): Promise<Course[]> {
-    const raw = await requireAPI().scanCourses({ accountIds: (accountIds ?? []).map((id) => Number.parseInt(id, 10)) })
-    return (raw as any[]).map(mapElectronCourse)
+  async scanCourses(accountIds?: string[], platform?: Platform): Promise<Course[]> {
+    const raw = await requireAPI().scanCourses({ accountIds: (accountIds ?? []).map((id) => Number.parseInt(id, 10)), platform })
+    return (raw as any[]).map((c) => ({ ...mapElectronCourse(c), platform: platform ?? 'chaoxing' }))
   }
 
-  async getCourses(accountId?: string): Promise<Course[]> {
-    const raw = await requireAPI().getCourses(accountId ? Number.parseInt(accountId, 10) : 0)
-    return (raw as any[]).map(mapElectronCourse)
+  async getCourses(accountId?: string, platform?: Platform): Promise<Course[]> {
+    const raw = await requireAPI().getCourses(accountId ? Number.parseInt(accountId, 10) : 0, platform)
+    return (raw as any[]).map((c) => ({ ...mapElectronCourse(c), platform: platform ?? 'chaoxing' }))
   }
 
-  async getAccounts(): Promise<Account[]> {
-    const raw = await requireAPI().getAccounts()
+  async getAccounts(platform?: Platform): Promise<Account[]> {
+    const raw = await requireAPI().getAccounts(platform)
     return raw.map((account: any) => ({
       id: String(account.id),
       username: account.username,
@@ -246,6 +289,7 @@ export class ElectronApiClient implements ChaoxingApi {
       website: account.website ?? '',
       status: account.enabled ? 'online' : 'offline',
       avatar: account.avatar,
+      platform: platform ?? 'chaoxing',
     }))
   }
 
@@ -272,7 +316,9 @@ export class ElectronApiClient implements ChaoxingApi {
       debugMode: raw.logLevel === 'debug',
       headless: raw.headless,
       targetAccuracy: raw.targetAccuracy ?? 100,
-      accountsFilePath: raw.accountsFilePath ?? '',
+      // Backend settings carry a single chaoxing-semantics slot; the
+      // zhihuishu path lives only in renderer localStorage.
+      accountsFilePaths: { chaoxing: raw.accountsFilePath ?? '', zhihuishu: '' },
       concurrencyTarget: raw.concurrencyTarget ?? null,
       perAccountEstimateGB: raw.perAccountEstimateGB ?? 0.7,
       pythonPath: raw.pythonPath ?? '',
@@ -291,7 +337,8 @@ export class ElectronApiClient implements ChaoxingApi {
       maxWorkers: settings.maxConcurrency,
       logLevel: settings.debugMode ? 'debug' : 'info',
       headless: settings.headless,
-      accountsFilePath: settings.accountsFilePath,
+      // The backend slot is chaoxing-semantics only (CHAOXING_ACCOUNTS_FILE).
+      accountsFilePath: settings.accountsFilePaths.chaoxing,
       concurrencyTarget: settings.concurrencyTarget,
       perAccountEstimateGB: settings.perAccountEstimateGB,
       pythonPath: settings.pythonPath,
@@ -321,24 +368,24 @@ export class ElectronApiClient implements ChaoxingApi {
     return requireAPI().testAi(provider)
   }
 
-  async addAccount(payload: { account: string; password: string; website?: string }): Promise<void> {
+  async addAccount(payload: { account: string; password: string; website?: string; platform?: Platform; accountsFile?: string }): Promise<void> {
     await requireAPI().addAccount(payload)
   }
 
-  async editAccount(payload: { index: number; password?: string; website?: string }): Promise<void> {
+  async editAccount(payload: { index: number; password?: string; website?: string; platform?: Platform; accountsFile?: string }): Promise<void> {
     await requireAPI().editAccount(payload)
   }
 
-  async removeAccount(index: number): Promise<void> {
-    await requireAPI().removeAccount({ index })
+  async removeAccount(index: number, platform?: Platform, accountsFile?: string): Promise<void> {
+    await requireAPI().removeAccount({ index, platform, accountsFile })
   }
 
   async openFilePicker(): Promise<string | null> {
     return requireAPI().openFilePicker()
   }
 
-  async getAccountsDefaultPath(): Promise<string> {
-    return requireAPI().getAccountsDefaultPath()
+  async getAccountsDefaultPath(platform?: Platform): Promise<string> {
+    return requireAPI().getAccountsDefaultPath(platform)
   }
 
   async getTickets(): Promise<Ticket[]> {
@@ -351,6 +398,7 @@ export class ElectronApiClient implements ChaoxingApi {
   }
 
   async resolveCaptcha(payload: {
+    jobId?: string
     ticketId: string
     accountId: number
     answer?: string
@@ -401,8 +449,9 @@ export class ElectronApiClient implements ChaoxingApi {
     const cleanup = requireAPI().onProgress((event: any) => {
       cb({
         jobId: event.jobId,
+        platform: event.platform,
         phase: event.phase ?? '',
-        phaseIndex: event.phaseIndex ?? this.currentHandle?.phaseIndex ?? 0,
+        phaseIndex: event.phaseIndex ?? 0,
         percent: event.percent,
         message: event.message,
         timestamp: Date.now(),
@@ -416,9 +465,10 @@ export class ElectronApiClient implements ChaoxingApi {
     const cleanup = requireAPI().onPhaseChange((event: any) => {
       cb({
         jobId: event.jobId,
+        platform: event.platform,
         fromPhase: event.fromPhase ?? '',
         toPhase: event.phase,
-        phaseIndex: event.phaseIndex ?? this.currentHandle?.phaseIndex ?? 0,
+        phaseIndex: event.phaseIndex ?? 0,
         timestamp: Date.now(),
       })
     })
@@ -426,9 +476,11 @@ export class ElectronApiClient implements ChaoxingApi {
     return cleanup
   }
 
-  onLog(cb: (line: { level: string; message: string; timestamp: number }) => void): () => void {
+  onLog(cb: (line: { jobId: string; platform?: Platform; level: string; message: string; timestamp: number }) => void): () => void {
     const cleanup = requireAPI().onLog((event: any) => {
       cb({
+        jobId: event.jobId,
+        platform: event.platform,
         level: event.level,
         message: event.message,
         timestamp: new Date(event.timestamp).getTime(),
@@ -471,6 +523,7 @@ export class ElectronApiClient implements ChaoxingApi {
     const cleanup = requireAPI().onError((event: any) => {
       cb({
         jobId: event.jobId,
+        platform: event.platform,
         error: event.error,
         phase: event.phase ?? '',
         recoverable: Boolean(event.recoverable),
@@ -489,6 +542,12 @@ export class ElectronApiClient implements ChaoxingApi {
 
   onMemory(cb: (e: MemoryEvent) => void): () => void {
     const cleanup = requireAPI().onMemory((event: any) => cb(event))
+    this.cleanupFns.push(cleanup)
+    return cleanup
+  }
+
+  onMemorySupervision(cb: (e: MemorySupervisionEvent) => void): () => void {
+    const cleanup = requireAPI().onMemorySupervision((event: any) => cb(event))
     this.cleanupFns.push(cleanup)
     return cleanup
   }

@@ -22,6 +22,11 @@ from core.logging_setup import (
     set_protocol_handler, signal_pause, signal_resume, signal_stop,
     log as core_log,
 )
+# 内存治理钩子：作为模块属性被 core.orchestrator.ModuleRunner 惰性读取
+from core.memory import (
+    MemoryMonitor, gate_open, measure_project_chrome_gb,
+    PER_ACCOUNT_INITIAL_GB,
+)
 from core.session import set_active_session
 
 from platforms.zhihuishu.auth import (
@@ -30,7 +35,7 @@ from platforms.zhihuishu.auth import (
 )
 from platforms.zhihuishu.scanner import scan_courses, scan_course_sections
 
-VALID_PHASES = ("idle", "login", "scan_courses", "completed",
+VALID_PHASES = ("idle", "login", "scan_courses", "solve_quiz", "completed",
                 "paused", "stopped", "error")
 
 _stdout_lock = threading.Lock()
@@ -88,6 +93,9 @@ def _protocol_handler(event: dict) -> None:
     elif et == "TICKET":
         if isinstance(event.get("ticket"), dict):
             _write_json_line({"type": "TICKET", "ticket": event["ticket"]})
+    elif et == "MEMORY":
+        # core.memory.MemoryMonitor 的快照（预算仪表数据源）；缺此分支会被静默丢弃
+        _write_json_line(event)
 
 
 def _start_stdin_controller() -> threading.Thread:
@@ -130,19 +138,27 @@ THREAD_PREFIX = "zhihuishu-account"
 
 
 class RunConfig:
-    """智慧树任务配置（与超星 RunConfig 同构的最小集）。"""
+    """智慧树任务配置（与超星 RunConfig 同构的最小集）。
+
+    双向自洽推导（真机实测教训：core.orchestrator 生产构造只传
+    scan_only/quiz_only 布尔、mode 落默认值；直接构造又只传 mode——
+    单边读取会误判，两边任传其一都推导齐全）。
+    """
 
     def __init__(self, *, course=None, dry_run=False, resume=False,
                  scan_only=False, quiz_only=False, content_only=False,
-                 grade_only=False, yes=True, mode="scan_only"):
+                 grade_only=False, yes=True, mode=None):
         self.course = course
         self.dry_run = dry_run
         self.resume = resume
-        self.scan_only = scan_only
-        self.quiz_only = quiz_only
         self.content_only = content_only
         self.grade_only = grade_only
         self.yes = yes
+        if mode is None:
+            mode = ("scan_only" if scan_only
+                    else "solve_only" if quiz_only else "full")
+        self.scan_only = scan_only or (mode == "scan_only")
+        self.quiz_only = quiz_only or (mode == "solve_only")
         self.mode = mode
 
 
@@ -182,8 +198,34 @@ def max_concurrent_cfg():
         return None
 
 
+def filter_courses(courses: list, course_filter: str = None) -> list:
+    """按 --courses 令牌过滤课程（name/recruitId/courseId 任一匹配即保留）。
+
+    前端选中课程点启动时 Electron 会传 `--courses`（超星同款）；令牌来自
+    渲染层 Course.id（智慧树课程无单一 id 概念，按三字段宽松匹配）。
+    """
+    if not course_filter:
+        return courses
+    tokens = [t.strip() for t in str(course_filter).split(",") if t.strip()]
+    if not tokens:
+        return courses
+    out = []
+    for c in courses:
+        keys = {str(c.get("name", "")), str(c.get("recruitId", "")),
+                str(c.get("courseId", ""))}
+        if any(any(t == k or t in k for k in keys) for t in tokens):
+            out.append(c)
+    return out
+
+
 def _run_account(account_index: int, creds: dict, config) -> bool:
-    mode = getattr(config, "mode", "scan_only")
+    # 生产路径由 core.orchestrator 构造 config 只传布尔；直接构造只传 mode——
+    # RunConfig 双向自洽推导后这里只需读 flags（真机实测曾因读 config.mode
+    # 默认值让生产路径永远进不了视频/答题分支）。
+    scan_only = bool(getattr(config, "scan_only", False))
+    quiz_only = bool(getattr(config, "quiz_only", False))
+    dry_run = bool(getattr(config, "dry_run", False))
+    grade_only = bool(getattr(config, "grade_only", False))
     session = f"{SESSION_PREFIX}-{account_index}"
     set_active_session(session)
 
@@ -194,7 +236,7 @@ def _run_account(account_index: int, creds: dict, config) -> bool:
     _emit_progress(20, "已登录", account_index)
 
     _emit_phase("scan_courses")
-    courses = scan_courses()
+    courses = filter_courses(scan_courses(), getattr(config, "course", None))
     if not courses:
         _emit_progress(100, "未发现共享课", account_index)
         return True
@@ -222,29 +264,49 @@ def _run_account(account_index: int, creds: dict, config) -> bool:
              f"状态已存 {path.name}")
     _emit_progress(95, f"扫描完成：{len(courses)} 门课", account_index)
 
-    if mode != "scan_only":
+    if not scan_only:
         # M3：视频章节自动完成（D6 决策——仅 1.0 倍速真实播放，全程类人操作）
-        from platforms.zhihuishu.video import ZhihuishuVideoBot
-        for i, c in enumerate(courses):
+        # solve_only（仅刷题）跳过视频阶段，直接进入 M4 答题。
+        if not quiz_only:
+            from platforms.zhihuishu.video import ZhihuishuVideoBot
+            for i, c in enumerate(courses):
+                if SHUTDOWN_FLAG.is_set():
+                    break
+                remaining = len(c.get("remaining_sections", []))
+                if not remaining:
+                    continue
+                core_log(f"Account {account_index}：开始视频 {c['name']}"
+                         f"（待看 {remaining} 节，原速真实播放）")
+                _emit_progress(95, f"视频学习：{c['name']}", account_index)
+                ZhihuishuVideoBot(c).run()
+                # 处理完重扫一次进度（复用扫描链路）
+                tree = scan_course_sections(c["recruitId"], c["courseId"])
+                if tree:
+                    c["chapters"] = tree["chapters"]
+                    c["remaining_sections"] = [
+                        {"chapter": ch["name"], **s}
+                        for ch in c["chapters"] for s in ch["sections"]
+                        if s["kind"] == "video" and not s.get("finished")
+                    ]
+            _save_discovered(account_index, courses)
+
+        # M4：章节测验/作业求解（AI 路由，架构对齐超星 quiz solver）
+        if SHUTDOWN_FLAG.is_set():
+            return True
+        _emit_phase("solve_quiz")
+        from platforms.zhihuishu.solvers.quiz import ZhihuishuQuizSolver
+        for c in courses:
             if SHUTDOWN_FLAG.is_set():
                 break
-            remaining = len(c.get("remaining_sections", []))
-            if not remaining:
+            if not c.get("quiz_sections"):
                 continue
-            core_log(f"Account {account_index}：开始视频 {c['name']}"
-                     f"（待看 {remaining} 节，原速真实播放）")
-            _emit_progress(95, f"视频学习：{c['name']}", account_index)
-            ZhihuishuVideoBot(c).run()
-            # 处理完重扫一次进度（复用扫描链路）
-            tree = scan_course_sections(c["recruitId"], c["courseId"])
-            if tree:
-                c["chapters"] = tree["chapters"]
-                c["remaining_sections"] = [
-                    {"chapter": ch["name"], **s}
-                    for ch in c["chapters"] for s in ch["sections"]
-                    if s["kind"] == "video" and not s.get("finished")
-                ]
-        _save_discovered(account_index, courses)
+            core_log(f"Account {account_index}：开始答题 {c['name']}"
+                     f"（测验 {len(c['quiz_sections'])} 节，"
+                     f"{'模拟运行' if grade_only else 'AI 作答'}）")
+            _emit_progress(95, f"答题求解：{c['name']}", account_index)
+            ZhihuishuQuizSolver(c, dry_run=dry_run,
+                                grade_only=grade_only).run()
+        _emit_phase("scan_courses")  # 答题阶段结束回到扫描口径，终态由 main 盖章
     return True
 
 
@@ -256,12 +318,46 @@ def main() -> None:
     parser.add_argument("--accounts", type=str, required=True,
                         help="Comma-separated account indices")
     parser.add_argument("--mode", type=str, default="scan_only",
-                        choices=["scan_only", "full", "solve_only"])
+                        choices=["scan_only", "full", "solve_only"],
+                        help="Execution mode: full (video + quiz), scan_only "
+                             "(scan + report), solve_only (quiz only, skip video)")
+    parser.add_argument(
+        "--courses", type=str, default=None,
+        help="Comma-separated course filter tokens (name/recruitId/courseId; "
+             "Electron passes the renderer's selected course ids).",
+    )
+    parser.add_argument(
+        "--grade-only", action="store_true", default=False,
+        help="模拟运行: 章节测验完整导航→抽取→AI→填答但绝不提交（人工接管）；"
+             "对齐超星 grade_only 语义，映射前端「模拟运行」开关。",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="答题阶段纯跳过（零导航零提交，对齐超星 dry_run 语义）。",
+    )
+    parser.add_argument(
+        "--max-concurrent", type=int, default=None,
+        help="Runtime size of the account semaphore (Electron computes this "
+             "from the memory/CPU plan; CLI runs fall back to config).")
+    parser.add_argument(
+        "--budget-gb", type=float, default=None,
+        help="Project memory budget in GB (Electron-computed).")
+    parser.add_argument(
+        "--system-limit-gb", type=float, default=None,
+        help="Absolute system-used-RAM emergency threshold in GB "
+             "(baseline + budget + margin, Electron-computed).")
+    parser.add_argument(
+        "--per-account-estimate-gb", type=float, default=None,
+        help="Initial per-Chrome memory estimate in GB (default 0.7).")
     cli = parser.parse_args()
 
     _job_id = cli.job_id
     stdin_thread = _start_stdin_controller()
     set_protocol_handler(_protocol_handler)
+
+    if cli.system_limit_gb:
+        from core.logging_setup import set_ram_limit_gb
+        set_ram_limit_gb(float(cli.system_limit_gb))
 
     indices = sorted({int(s) for s in cli.accounts.split(",") if s.strip().isdigit()})
     if not indices:
@@ -288,7 +384,12 @@ def main() -> None:
     try:
         _emit_phase("login")
         run_multi_account_generic(
-            ModuleRunner(_sys.modules[__name__]), indices, mode=cli.mode)
+            ModuleRunner(_sys.modules[__name__]), indices, mode=cli.mode,
+            course=cli.courses,
+            grade_only=cli.grade_only, dry_run=cli.dry_run,
+            max_concurrent=cli.max_concurrent, budget_gb=cli.budget_gb,
+            system_limit_gb=cli.system_limit_gb,
+            per_account_estimate_gb=cli.per_account_estimate_gb)
         if SHUTDOWN_FLAG.is_set():
             _emit_phase("stopped")
             _emit_error(f"Job stopped by user after {time.time() - start:.0f}s")

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # 默认 types 只有 opened/synchronize/reopened：PR retarget 基分支（edited）
+    # 后 required checks 不会重跑，只能靠空提交触发。显式补齐 edited。
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

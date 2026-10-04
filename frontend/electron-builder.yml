@@ -1,5 +1,5 @@
-appId: com.chaoxing.assistant
-productName: 超星助手
+appId: cn.edu.jlu.assistant
+productName: JLU 学习助手
 copyright: Copyright © 2024
 
 directories:
@@ -41,6 +41,9 @@ extraResources:
       - scripts/_table.json
       - scripts/_decrypt_font.js
       - scripts/_v17_section_player.js
+      # 易盾滑块自动求解的完整版 stealth（MIT，berstend/puppeteer-extra
+      # 构建产物；缺失时 slider.py 降级内置 mini 补丁，通过率下降）
+      - scripts/stealth.min.js
       - chaoxing_config.example.json
       - .playwright/cli.config.json
       - requirements.txt

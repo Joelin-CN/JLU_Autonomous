@@ -66,7 +66,11 @@ function toAccount(b: BackendAccount): Account {
   }
 }
 
-function runAccountsCommand(extraArgs: string[], platform: Platform = 'chaoxing'): Promise<AccountsPayload> {
+function runAccountsCommand(
+  extraArgs: string[],
+  platform: Platform = 'chaoxing',
+  accountsFile?: string,
+): Promise<AccountsPayload> {
   return new Promise((resolve, reject) => {
     const pythonPath = getAccountsPython()
 
@@ -85,16 +89,22 @@ function runAccountsCommand(extraArgs: string[], platform: Platform = 'chaoxing'
     }
     safeEnv.CHAOXING_WORKSPACE = process.env.CHAOXING_WORKSPACE ?? WORKSPACE_DIR
     safeEnv.CHAOXING_DATA_DIR = process.env.CHAOXING_DATA_DIR ?? DATA_DIR
-    const accountsFile = getCurrentSettings().accountsFilePath
-    if (accountsFile) safeEnv.CHAOXING_ACCOUNTS_FILE = accountsFile
+
+    if (platform === 'zhihuishu') {
+      // Renderer-configured path wins, then the env override, then the
+      // platform default (passwords/zhihuishu.txt).
+      safeEnv.ZHIHUISHU_ACCOUNTS_FILE =
+        accountsFile
+        ?? process.env.ZHIHUISHU_ACCOUNTS_FILE
+        ?? path.join(DATA_DIR, 'passwords', 'zhihuishu.txt')
+    } else {
+      // The backend settings slot is chaoxing-semantics (CHAOXING_ACCOUNTS_FILE).
+      const chaoxingFile = accountsFile ?? getCurrentSettings().accountsFilePath
+      if (chaoxingFile) safeEnv.CHAOXING_ACCOUNTS_FILE = chaoxingFile
+    }
 
     let child
     try {
-      if (platform === 'zhihuishu') {
-        safeEnv.ZHIHUISHU_ACCOUNTS_FILE =
-          process.env.ZHIHUISHU_ACCOUNTS_FILE
-          ?? path.join(DATA_DIR, 'passwords', 'zhihuishu.txt')
-      }
       child = spawn(pythonPath, ['-m', `platforms.${platform}.accounts`, ...extraArgs], {
         cwd: CODE_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -162,8 +172,13 @@ function runAccountsCommand(extraArgs: string[], platform: Platform = 'chaoxing'
   })
 }
 
-function requireIdle(): void {
-  if (isJobActive()) throw new Error('任务运行中不可修改账号。')
+/**
+ * 账号增删改互斥：只锁「该平台自己的活跃任务」——超星任务运行时仍可维护
+ * 智慧树账号文件，反之亦然（双平台并行语义）。
+ */
+function requireIdle(platform?: unknown): void {
+  const normalized = platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing'
+  if (isJobActive(normalized)) throw new Error('该平台任务运行中不可修改账号。')
 }
 
 export function registerAccountsHandlers(): void {
@@ -172,28 +187,34 @@ export function registerAccountsHandlers(): void {
     return path.join(DATA_DIR, 'passwords', `${platform}.txt`)
   })
 
-  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_LIST, async () => {
-    const parsed = await runAccountsCommand([], 'chaoxing')
+  ipcMain.handle(IPC_CHANNELS.ACCOUNTS_LIST, async (_e, p?: { platform?: Platform; accountsFile?: string }) => {
+    const platform: Platform = p?.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing'
+    // 显式传 list 子命令：超星无参时默认 list，但智慧树 argparse 的 command
+    // 必填——空参会 exit 2（真实模式下智慧树账号列表一直拉不到的根因）。
+    const parsed = await runAccountsCommand(['list'], platform, p?.accountsFile)
     if (parsed.type !== 'ACCOUNTS') throw new Error('账号列表返回异常。')
     return parsed.accounts.map(toAccount)
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_ADD, async (_e, p) => {
-    requireIdle()
+    requireIdle(p?.platform)
     await runAccountsCommand(['add', '--account', String(p.account),
       '--password', String(p.password),
-      ...(p.website ? ['--website', p.website] : [])])
+      ...(p.website ? ['--website', p.website] : [])],
+      p.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing', p.accountsFile)
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_EDIT, async (_e, p) => {
-    requireIdle()
+    requireIdle(p?.platform)
     await runAccountsCommand(['edit', '--index', String(p.index),
       ...(p.password ? ['--password', String(p.password)] : []),
-      ...(p.website ? ['--website', p.website] : [])])
+      ...(p.website ? ['--website', p.website] : [])],
+      p.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing', p.accountsFile)
   })
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNTS_REMOVE, async (_e, p) => {
-    requireIdle()
-    await runAccountsCommand(['remove', '--index', String(p.index)])
+    requireIdle(p?.platform)
+    await runAccountsCommand(['remove', '--index', String(p.index)],
+      p.platform === 'zhihuishu' ? 'zhihuishu' : 'chaoxing', p.accountsFile)
   })
 }
