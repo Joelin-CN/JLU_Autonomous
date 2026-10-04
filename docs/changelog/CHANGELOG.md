@@ -2,6 +2,15 @@
 
 本文件汇总各轮变更；历史明细见 [archive/](archive/) 下的原始 FIXLOG。
 
+## 2026-10-04 — 易盾滑块自动求解落地：账密登录全自动（D3 后备专项提前实施，真机一次通过）
+
+- **`platforms/zhihuishu/slider.py`（单测 +24）**：四件套——① **stealth 指纹补丁**（`scripts/stealth.min.js` 完整版优先，berstend/puppeteer-extra MIT 构建产物，addInitScript+addScriptTag 双通道注入；内置 mini 版兜底，缺失有测试守卫）；② **缺口定位**＝拼图 alpha 轮廓 × 背景二值边缘图的命中率扫描（纯 stdlib PNG 解码，无新依赖；真机置信度 0.74–1.00，远峰区分度门槛 80%）；③ **闭环拟人拖拽**——真机标定发现易盾**滑钮位移≠拼图位移（k≈0.88）**，主轨迹按 1/0.9 估计行程 + 按住不放读拼图实际位置迭代校正至 |err|≤1.2px + 过冲回正/迟疑/释放前微颤；④ 判定轮询（validate/跳转/图刷新三信号，修复判定竞态）。详见 `docs/reports/updates/ZHIHUISHU_SLIDER_UPDATE_2026-10-04.md`。
+- **auth.py 接入**：密码登录自动求解优先，未过/禁用（`ZHIHUISHU_SLIDER_AUTO=0` / `zhihuishu_slider.auto_solve`）回退原人工工单；新增 `ZHIHUISHU_LOGIN_MODE=auto|qr|password`（E2E/排障直测密码链路）。
+- **E2E 顺带抓修 3 个存量缺陷**：登录中心默认停「扫码」Tab 且「账号登录」Tab id 带点（`#tab-1.1` CSS 解析歧义点空）——密码兜底链此前一直 FORM_NOT_FOUND 直败；`ensure_zhihuishu_browser` 复用已开会话时不设 active session（run-code 全打到 chaoxing 会话）；单行拼接 JS 的 `//` 注释吞尾。
+- **真机验证（干净登录态，HEADED + LOGIN_MODE=password）**：**1 次尝试通过、零人工介入**——定位置信度 1.00 → 闭环 err 4.9→-0.1px → 页面跳转 → storageState 导出 70 cookies → `ensure_logged_in` True。过程实证：mini stealth + ±1px 落点仍被拒（M0「指纹拒绝」结论复验），完整 stealth 后同精度通过。
+- 打包：electron-builder extraResources 白名单补 `scripts/stealth.min.js`。
+- 门禁：pytest `tests/unit + tests/platforms` **700 passed**（unit 626 基线无回归）。
+
 ## 2026-09-14 — E2E 轮 1（真实前端按钮）：全链路通 + 抓修 3 个渲染层缺陷
 
 - **E2E（智慧树「仅刷题」+ 模拟运行，真实账号）**：按钮 → spawn → 课程过滤 → solver → DeepSeek 逐题视觉作答 → 草稿 9/10 未提交；已交卷/列表页形态优雅跳过；整单 solved 1/skipped 5/failed 0。前置全链路审核报告：`docs/reports/analysis/E2E_AUDIT_M4_CHAIN_2026-09-14.md`。

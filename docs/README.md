@@ -22,7 +22,7 @@
 | [standards/directory.md](standards/directory.md) | 目录规范：什么放哪里 + 多平台目标布局 |
 | [standards/documents.md](standards/documents.md) | 文件规范：命名 / 归档 / 文档同步义务 |
 | [standards/secrets.md](standards/secrets.md) | 凭据红线：入库禁令与泄露应急 |
-| [roadmap/zhihuishu.md](roadmap/zhihuishu.md) | 智慧树支持路线图（M0–M4 已落地并真机验证；含 ADR D2–D6 与滑块专项结论） |
+| [roadmap/zhihuishu.md](roadmap/zhihuishu.md) | 智慧树支持路线图（M0–M4 + 滑块自动求解已落地并真机验证；含 ADR D2–D6） |
 | [design/architecture.md](design/architecture.md) | 架构全景（core/ + platforms/ 多平台布局 + 智慧树链路要点） |
 | [design/api.md](design/api.md) | 前后端完整 API 契约（三层协议，含 platform 路由） |
 | [design/integration.md](design/integration.md) | 前后端整合细节与运行约定 |
@@ -31,8 +31,10 @@
 | [reports/analysis/ZHIHUISHU_REFS_2026-09-12.md](reports/analysis/ZHIHUISHU_REFS_2026-09-12.md) | 智慧树 M0 调研：第三方参考矩阵（11 GitHub + 4 油猴） |
 | [reports/analysis/ZHIHUISHU_ANALYSIS_2026-09-12.md](reports/analysis/ZHIHUISHU_ANALYSIS_2026-09-12.md) | 智慧树 M0 调研：Q1–Q8 实证与选择器交叉确认清单 |
 | [reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md](reports/analysis/ZHIHUISHU_SLIDER_ANALYSIS_2026-09-13.md) | 智慧树易盾滑块可行性专项（维持人工工单 + 后备专项触发条件） |
+| [reports/updates/ZHIHUISHU_SLIDER_UPDATE_2026-10-04.md](reports/updates/ZHIHUISHU_SLIDER_UPDATE_2026-10-04.md) | 易盾滑块自动求解落地报告（stealth / 命中率定位 / 闭环拖拽 k≈0.88 / E2E 一次通过） |
 | [reports/fixes/MEMORY_FIX_2026-09-13.md](reports/fixes/MEMORY_FIX_2026-09-13.md) | CIM 采样性能修复（粗筛快路径 + 属性投影 + TTL 缓存） |
 | [validation/VALIDATION_AFTER_ZHIHUISHU_M1M2_2026-09-12.md](validation/VALIDATION_AFTER_ZHIHUISHU_M1M2_2026-09-12.md) | 智慧树 M1/M2 验证清单（平台抽象 + 登录/扫描链路） |
+| [validation/VALIDATION_AFTER_SLIDER_AUTO_2026-10-04.md](validation/VALIDATION_AFTER_SLIDER_AUTO_2026-10-04.md) | 滑块自动求解验证清单（P0/P1 全过：单测 700 + 真机一次通过） |
 | [validation/VALIDATION_AFTER_P1_SUPERVISION_M4_2026-09-13.md](validation/VALIDATION_AFTER_P1_SUPERVISION_M4_2026-09-13.md) | P1 增量收尾 + M4 验证清单（监督/仪表/M4/滑块，含真机验证受阻记录与补验条件） |
 
 ## 归档规则

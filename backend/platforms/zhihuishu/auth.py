@@ -5,11 +5,14 @@
 
 登录策略（调研结论 Q1，降级链）：
     1. profile 已带登录态（Cookie 持久化）→ 直接可用；
-    2. 扫码登录（首选）：切「扫码」Tab → 截图二维码发 TICKET 工单 → 轮询
+    2. 扫码登录（默认首选）：切「扫码」Tab → 截图二维码发 TICKET 工单 → 轮询
        登录跳转（知到 APP 扫码确认）；
-    3. 密码登录（兜底）：JS 填表 + 真实点击提交；必触发易盾滑块 → 截图发
-       工单，请用户在**有头**窗口手动完成拖拽（M2 不做自动求解，
-       自动求解为独立专项 yidun_slider，见路线图）。
+    3. 密码登录（兜底）：JS 填表 + 真实点击提交；易盾滑块**自动求解优先**
+       （platforms.zhihuishu.slider，stealth + 缺口定位 + 拟人轨迹），
+       未过或被禁用时截图发工单请用户在有头窗口手动拖拽。
+
+ZHIHUISHU_LOGIN_MODE=auto（默认）| qr（仅扫码）| password（跳过扫码直测
+密码+滑块链路，E2E/排障用）。
 
 工程红线：提交点击必须走 pw_click（真实事件）；禁止 evaluate 驱动媒体与
 monkey-patch（异常行为会锁课，见调研报告 Q5）。
@@ -103,6 +106,10 @@ def ensure_zhihuishu_browser(account_index: int = 0) -> bool:
     """
     session = _session_name(account_index)
     if is_zhihuishu_browser_open(session):
+        # 复用已开会话也必须设 active session——否则本进程后续 run-code
+        # 全部打到默认 chaoxing 会话（2026-10-04 E2E 抓到的隐患）
+        from core.session import set_active_session
+        set_active_session(session)
         return True
 
     profile = profile_dir_for_session(session, account_index)
@@ -387,37 +394,98 @@ def _submit_login_real_click() -> bool:
         return False
 
 
-def _open_qr_tab_real_click() -> bool:
-    """Switch to the QR-code login tab with a REAL click (Element Plus).
+def _open_tab_by_text_real_click(text: str) -> bool:
+    """按文本找登录 Tab 并真实点击（Tab 的 DOM id 是内部编号，不能写死）。
 
-    Tab 的 DOM id 是内部编号（实测：账号登录=#tab-1.1 / 学号登录=#tab-2 /
-    工号登录=#tab-2.1 / 扫码=#tab-3），不能写死——先按文本找 id 再真实点击。
+    实测 2026-10-04：登录中心默认停在「扫码」Tab，密码表单要点
+    「账号登录」Tab 才渲染——旧兜底链缺这一步，FORM_NOT_FOUND 直败。
     """
     from core.browser.engine import pw
     discover_js = ("async (page) => { const r = await page.evaluate(() => {"
                    " const t = [...document.querySelectorAll('.el-tabs__item')]"
-                   " .find(el => (el.innerText||'').trim() === '扫码');"
+                   f" .find(el => (el.innerText||'').trim() === {_js_str(text)});"
                    " return t ? t.id : ''; }); return r; }")
     tab_id = ""
     try:
         raw = _run_js_file(discover_js, timeout=15)
-        import json as _json
         tab_id = (pw_extract_result(raw) or "").strip().strip('"')
     except Exception as e:
-        log(f"查找扫码 Tab 失败：{e}", "WARN")
+        log(f"查找「{text}」Tab 失败：{e}", "WARN")
     if tab_id:
         try:
-            pw("click", f"#{tab_id}",
+            # Tab id 是 Element Plus 内部编号，可能带点（实测账号登录=
+            # tab-1.1）——#tab-1.1 会被 CSS 解析成 id+class 而点空，
+            # 必须走属性选择器
+            pw("click", f'[id="{tab_id}"]',
                timeout=cfg("timeouts.click_action", 10))
+            human_delay(1.2, 0.2)
             return True
         except Exception as e:
-            log(f"点击扫码 Tab（#{tab_id}）失败：{e}", "WARN")
-    log("未找到「扫码」Tab", "ERROR")
+            log(f"点击「{text}」Tab（{tab_id}）失败：{e}", "WARN")
+    log(f"未找到「{text}」Tab", "WARN")
+    return False
+
+
+def _open_qr_tab_real_click() -> bool:
+    """Switch to the QR-code login tab with a REAL click (Element Plus)."""
+    return _open_tab_by_text_real_click("扫码")
+
+
+def _login_mode() -> str:
+    """ZHIHUISHU_LOGIN_MODE：auto（默认）/ qr / password。"""
+    return os.environ.get("ZHIHUISHU_LOGIN_MODE", "auto").strip().lower()
+
+
+def _password_login(account_index: int, cred: dict) -> bool:
+    """密码登录：滑块自动求解优先，失败转人工工单。"""
+    from platforms.zhihuishu.slider import auto_solve_slider, inject_stealth
+
+    # 指纹补丁必须在易盾初始化之前注入（本页 evaluate + 后续导航 init）
+    inject_stealth()
+
+    pw_goto(LOGIN_URL)
+    human_delay(2.0, 0.25)
+    # 默认停在「扫码」Tab，先切「账号登录」再填表
+    _open_tab_by_text_real_click("账号登录")
+    if not _fill_password_form(cred["account"], cred["password"]):
+        log("登录表单填写失败", "ERROR")
+        return False
+    if not _submit_login_real_click():
+        return False
+    human_delay(2.0, 0.2)
+
+    # 低风险环境可能不触发滑块、直接跳转
+    ok, url = _probe_login_state()
+    if url and "login.zhihuishu.com" not in url:
+        log("密码登录未触发滑块，已直接跳转")
+        return is_logged_in_on_course_list()
+
+    if auto_solve_slider(account_index):
+        human_delay(2.5, 0.3)
+        ok, url = _probe_login_state()
+        # 验证通过但表单未自动提交的形态：补一次真实点击
+        if "login.zhihuishu.com" in (url or ""):
+            _submit_login_real_click()
+            human_delay(2.0, 0.3)
+        if _wait_login_redirect(45.0, "滑块后登录跳转"):
+            return is_logged_in_on_course_list()
+        log("滑块已过但登录未跳转", "WARN")
+        return False
+
+    # 自动求解未过/被禁用 → 人工兜底（有头窗口拖拽）
+    _screenshot_ticket(
+        f"zhihuishu-slider-{account_index}",
+        "智慧树滑块验证",
+        "自动求解未通过，请在浏览器窗口中手动拖动滑块完成验证",
+        _SLIDER_LOGIN_TIMEOUT,
+    )
+    if _wait_login_redirect(_SLIDER_LOGIN_TIMEOUT, "滑块验证"):
+        return is_logged_in_on_course_list()
     return False
 
 
 def zhihuishu_login(account_index: int = 0) -> bool:
-    """Full login flow: QR first, password+manual-slider fallback.
+    """Full login flow: QR first, password+auto-slider fallback.
 
     Returns True when the session ends up logged in.
     """
@@ -432,54 +500,41 @@ def zhihuishu_login(account_index: int = 0) -> bool:
     pw_goto(LOGIN_URL)
     human_delay(2.0, 0.25)
 
+    mode = _login_mode()
+
     # ── 首选：扫码登录（无验证码，实测可行）──
-    log("尝试扫码登录（请用「知到」APP 扫描二维码）...")
-    try:
-        if _open_qr_tab_real_click():
-            human_delay(1.5, 0.2)
-            _screenshot_ticket(
-                f"zhihuishu-qr-login-{account_index}",
-                "智慧树扫码登录",
-                "请用「知到」APP 扫一扫确认登录；扫码成功后自动继续",
-                _QR_LOGIN_TIMEOUT,
-            )
-            if _wait_login_redirect(_QR_LOGIN_TIMEOUT, "扫码登录"):
-                # 跳转成功立刻导出（Cookie 跨子域传播可能延迟，校验失败也
-                # 不浪费这次扫码——storageState 已落盘供下次恢复），
-                # 校验失败间隔数秒重试一次（2026-09-13 晚真机竞态）。
-                export_login_state(account_index)
-                human_delay(2.5, 0.4)
-                if is_logged_in_on_course_list():
-                    return True
-                log("课程列表校验未过（Cookie 传播延迟？），重试一次", "WARN")
-                human_delay(4.0, 0.5)
-                return is_logged_in_on_course_list()
-    except Exception as e:
-        log(f"扫码登录流程异常：{e}", "WARN")
+    if mode in ("auto", "qr", ""):
+        log("尝试扫码登录（请用「知到」APP 扫描二维码）...")
+        try:
+            if _open_qr_tab_real_click():
+                human_delay(1.5, 0.2)
+                _screenshot_ticket(
+                    f"zhihuishu-qr-login-{account_index}",
+                    "智慧树扫码登录",
+                    "请用「知到」APP 扫一扫确认登录；扫码成功后自动继续",
+                    _QR_LOGIN_TIMEOUT,
+                )
+                if _wait_login_redirect(_QR_LOGIN_TIMEOUT, "扫码登录"):
+                    # 跳转成功立刻导出（Cookie 跨子域传播可能延迟，校验失败也
+                    # 不浪费这次扫码——storageState 已落盘供下次恢复），
+                    # 校验失败间隔数秒重试一次（2026-09-13 晚真机竞态）。
+                    export_login_state(account_index)
+                    human_delay(2.5, 0.4)
+                    if is_logged_in_on_course_list():
+                        return True
+                    log("课程列表校验未过（Cookie 传播延迟？），重试一次", "WARN")
+                    human_delay(4.0, 0.5)
+                    return is_logged_in_on_course_list()
+        except Exception as e:
+            log(f"扫码登录流程异常：{e}", "WARN")
 
-    # ── 兜底：密码登录 + 易盾滑块人工处理 ──
-    log("扫码未完成，回退密码登录（将触发滑块验证，需人工完成）...")
-    pw_goto(LOGIN_URL)
-    human_delay(2.0, 0.25)
-    if not _fill_password_form(cred["account"], cred["password"]):
-        log("登录表单填写失败", "ERROR")
+    if mode == "qr":
+        log("ZHIHUISHU_LOGIN_MODE=qr：扫码未完成且不回退密码", "ERROR")
         return False
-    if not _submit_login_real_click():
-        return False
-    human_delay(2.5, 0.25)
 
-    # 易盾滑块：截图工单，等待用户在有头窗口手动拖拽
-    _screenshot_ticket(
-        f"zhihuishu-slider-{account_index}",
-        "智慧树滑块验证",
-        "请在浏览器窗口中手动拖动滑块完成验证（自动求解为后续专项）",
-        _SLIDER_LOGIN_TIMEOUT,
-    )
-    if _wait_login_redirect(_SLIDER_LOGIN_TIMEOUT, "滑块验证"):
-        return is_logged_in_on_course_list()
-
-    log("登录超时（扫码与滑块均未完成）", "ERROR")
-    return False
+    # ── 兜底：密码登录 + 易盾滑块（自动求解优先）──
+    log("扫码未完成，回退密码登录（易盾滑块自动求解优先）...")
+    return _password_login(account_index, cred)
 
 
 def ensure_logged_in(account_index: int = 0) -> bool:

@@ -8,7 +8,7 @@
 
 ## 项目概况
 
-- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 全套；智慧树 🚧 建设中（登录/课程扫描 ✅、视频 ✅、答题 M4 ✅ 真机验证过；滑块专项结论＝维持人工工单，见 `docs/roadmap/zhihuishu.md`）。项目范围仅此两个平台。
+- **JLU Autonomous** —— 吉林大学网课多平台自动学习助手 monorepo：超星学习通 ✅ 全套；智慧树 🚧 建设中（登录/课程扫描 ✅、视频 ✅、答题 M4 ✅ 真机验证过；易盾滑块自动求解 ✅ 2026-10-04 真机一次通过，账密登录全自动，见 `docs/reports/updates/ZHIHUISHU_SLIDER_UPDATE_2026-10-04.md`）。项目范围仅此两个平台。
 - `frontend/`（Electron + Vue 3）与 `backend/`（Python 3.10+，Playwright 浏览器自动化 + AI 答题）在同一仓库。
 - 前端按 Electron 进程划分：`electron/`（主进程）/ `src/`（渲染进程，Vue 3 + Pinia）/ `src/shared/`（共享层）。
 - 后端按平台分包（M1 多平台架构）：`backend/core/`（平台无关层）+ `backend/platforms/{chaoxing,zhihuishu}/`（平台实现，入口 `python -m platforms.<platform>.api`，JSON-line 协议与 Electron 通信）+ `backend/chaoxing/`（兼容垫片，旧入口 `python -m chaoxing.api` 语义不变）。
@@ -138,5 +138,5 @@ JLU_Autonomous/
 
 ---
 
-**文档版本**: 0.3（backend 目录树与入口更新为 core/ + platforms/ 多平台布局；智慧树实况同步）
-**创建日期**: 2026-08-07　**最近更新**: 2026-09-07
+**文档版本**: 0.4（智慧树滑块自动求解落地状态同步）
+**创建日期**: 2026-08-07　**最近更新**: 2026-10-04
